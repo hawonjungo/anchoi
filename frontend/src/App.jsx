@@ -39,7 +39,7 @@ function App() {
 
     setSpots(prev => [...prev, newSpot]);
 
-    // Pan map safely using ref
+    // Pan map to the new spot
     if (mapRef.current) {
       mapRef.current.panTo({ lat: newSpot.lat, lng: newSpot.lng });
       mapRef.current.setZoom(16);
@@ -49,7 +49,6 @@ function App() {
     setVideoUrl("");
     setAddress("");
   };
-
 
   const extractCity = (address) => {
     const parts = address.split(",");
@@ -75,6 +74,15 @@ function App() {
       console.error("Geocode error:", err);
       return null;
     }
+  };
+
+  // --- New function to fit all pins ---
+  const showAllPins = () => {
+    if (!mapRef.current || spots.length === 0) return;
+
+    const bounds = new window.google.maps.LatLngBounds();
+    spots.forEach(spot => bounds.extend({ lat: spot.lat, lng: spot.lng }));
+    mapRef.current.fitBounds(bounds);
   };
 
   return (
@@ -131,22 +139,27 @@ function App() {
 
       {/* --- MAP --- */}
       <div className="w-full max-w-4xl mt-6 bg-white shadow-md rounded-lg p-4">
+        <button
+          onClick={showAllPins}
+          className="mb-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+        >
+          Show All Pins
+        </button>
+
         {isLoaded ? (
           <GoogleMap
             mapContainerStyle={mapContainerStyle}
             center={defaultCenter}
             zoom={12}
-            onLoad={(map) => (mapRef.current = map)} // store map instance in ref
+            onLoad={(map) => (mapRef.current = map)}
           >
-
             {spots.map((spot, index) => (
               <Marker
                 key={index}
                 position={{ lat: spot.lat, lng: spot.lng }}
-                onClick={() => setSelectedSpot(spot)} // use spot instead of index
+                onClick={() => setSelectedSpot(spot)}
               />
             ))}
-
 
             {selectedSpot && (
               <InfoWindow
@@ -155,14 +168,13 @@ function App() {
               >
                 <div className="text-sm">
                   <h3 className="font-bold">{selectedSpot.spotName}</h3>
-                  <p className="text-gray-600">{selectedSpot.address}</p> {/* show full address */}
+                  <p className="text-gray-600">{selectedSpot.address}</p>
                   <a href={selectedSpot.videoUrl} target="_blank" className="text-blue-500 underline">
                     Watch video
                   </a>
                 </div>
               </InfoWindow>
             )}
-
           </GoogleMap>
         ) : (
           <div>Loading Map...</div>
@@ -191,7 +203,6 @@ function App() {
                       mapRef.current.setZoom(15);
                     }
                   }}
-
                 >
                   <td className="px-4 py-2">
                     <a href={spot.videoUrl} target="_blank" className="text-blue-500 underline">
