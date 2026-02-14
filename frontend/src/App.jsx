@@ -4,7 +4,7 @@ import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-map
 
 function App() {
   const env = import.meta.env;
-  const API_BASE = env.DEV ? "/api" : env.VITE_API_BASE_URL;
+  const API_BASE = env.VITE_API_BASE_URL;
 
   const [videoUrl, setVideoUrl] = useState('');
   const [spotName, setSpotName] = useState('');
