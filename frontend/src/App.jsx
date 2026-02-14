@@ -1,9 +1,10 @@
 import './App.css'
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-maps/api";
 
 function App() {
   const env = import.meta.env;
+  const API_BASE = env.VITE_API_BASE_URL;
 
   const [videoUrl, setVideoUrl] = useState('');
   const [spotName, setSpotName] = useState('');
@@ -19,70 +20,105 @@ function App() {
     googleMapsApiKey: env.VITE_GOOGLE_MAPS_API_KEY
   });
 
+  // ✅ Load spots from AWS on start
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/spots`);
+        if (!res.ok) throw new Error(`GET /spots failed: ${res.status}`);
+        const data = await res.json();
+        setSpots(data);
+      } catch (e) {
+        console.error(e);
+        alert("Failed to load spots from server. Check console.");
+      }
+    };
+    if (API_BASE) load();
+  }, [API_BASE]);
+
+  const geocodeAddress = async (address) => {
+    const res = await fetch(`${API_BASE}/geocode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+
+    return {
+      lat: data.lat,
+      lng: data.lng,
+      formattedAddress: data.formattedAddress,
+    };
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     const location = await geocodeAddress(address);
+
     if (!location) {
-      alert("Could not find location on map. Please check the address.");
+      alert("Could not find location.");
       return;
     }
 
-    const newSpot = {
-      spotName,
-      videoUrl,
-      address,
-      city: extractCity(address),
-      lat: location.lat,
-      lng: location.lng
-    };
-
-    setSpots(prev => [...prev, newSpot]);
-
-    // Pan map to the new spot
-    if (mapRef.current) {
-      mapRef.current.panTo({ lat: newSpot.lat, lng: newSpot.lng });
-      mapRef.current.setZoom(16);
-    }
-
-    setSpotName("");
-    setVideoUrl("");
-    setAddress("");
-  };
-
-  const extractCity = (address) => {
-    const parts = address.split(",");
-    return parts[parts.length - 1].trim();
-  };
-
-  const removeSpot = (index) => {
-    setSpots(spots.filter((_, i) => i !== index));
-    if (selectedSpot && spots[index] === selectedSpot) {
-      setSelectedSpot(null);
-    }
-  };
-
-  const geocodeAddress = async (address) => {
     try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${env.VITE_GOOGLE_MAPS_API_KEY}`
-      );
-      const data = await res.json();
-      if (data.status === "OK") return data.results[0].geometry.location;
-      return null;
+      const payload = {
+        spotName,
+        videoUrl,
+        address,
+        lat: location.lat,
+        lng: location.lng,
+      };
+
+      const res = await fetch(`${API_BASE}/spots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`POST /spots failed: ${res.status} ${errText}`);
+      }
+
+      const created = await res.json();
+      setSpots(prev => [...prev, created]);
+
+      // Pan map
+      if (mapRef.current) {
+        mapRef.current.panTo({ lat: created.lat, lng: created.lng });
+        mapRef.current.setZoom(16);
+      }
+
+      setSpotName("");
+      setVideoUrl("");
+      setAddress("");
     } catch (err) {
-      console.error("Geocode error:", err);
-      return null;
+      console.error(err);
+      alert("Failed to save spot. Check console.");
     }
   };
 
-  // --- New function to fit all pins ---
-  const showAllPins = () => {
-    if (!mapRef.current || spots.length === 0) return;
+  const removeSpot = async (spot) => {
+    try {
+      const res = await fetch(`${API_BASE}/spots/${spot.id}`, {
+        method: "DELETE",
+      });
 
-    const bounds = new window.google.maps.LatLngBounds();
-    spots.forEach(spot => bounds.extend({ lat: spot.lat, lng: spot.lng }));
-    mapRef.current.fitBounds(bounds);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`DELETE /spots failed: ${res.status} ${errText}`);
+      }
+
+      setSpots(prev => prev.filter(s => s.id !== spot.id));
+      if (selectedSpot?.id === spot.id) setSelectedSpot(null);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete spot. Check console.");
+    }
   };
 
   return (
@@ -91,11 +127,8 @@ function App() {
         🍜 AnChoi — Save Food/Fun Spots
       </h1>
 
-      {/* --- FORM --- */}
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white shadow-md rounded-lg p-6 w-full max-w-md space-y-4"
-      >
+      <form onSubmit={handleSubmit} className="bg-white shadow-md rounded-lg p-6 w-full max-w-md space-y-4">
+        {/* Video URL */}
         <div>
           <label className="block text-gray-700 font-medium mb-1">Video URL</label>
           <input
@@ -103,10 +136,10 @@ function App() {
             value={videoUrl}
             onChange={(e) => setVideoUrl(e.target.value)}
             className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-            placeholder="Paste TikTok / Reels / YouTube link"
           />
         </div>
 
+        {/* Spot Name */}
         <div>
           <label className="block text-gray-700 font-medium mb-1">Spot Name</label>
           <input
@@ -114,10 +147,10 @@ function App() {
             value={spotName}
             onChange={(e) => setSpotName(e.target.value)}
             className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-            placeholder="Enter spot name"
           />
         </div>
 
+        {/* Address */}
         <div>
           <label className="block text-gray-700 font-medium mb-1">Address</label>
           <input
@@ -125,27 +158,16 @@ function App() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-            placeholder="Enter address"
           />
         </div>
 
-        <button
-          type="submit"
-          className="w-full bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600 transition"
-        >
+        <button type="submit" className="w-full bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600 transition">
           Save Spot
         </button>
       </form>
 
-      {/* --- MAP --- */}
+      {/* MAP */}
       <div className="w-full max-w-4xl mt-6 bg-white shadow-md rounded-lg p-4">
-        <button
-          onClick={showAllPins}
-          className="mb-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-        >
-          Show All Pins
-        </button>
-
         {isLoaded ? (
           <GoogleMap
             mapContainerStyle={mapContainerStyle}
@@ -153,9 +175,9 @@ function App() {
             zoom={12}
             onLoad={(map) => (mapRef.current = map)}
           >
-            {spots.map((spot, index) => (
+            {spots.map((spot) => (
               <Marker
-                key={index}
+                key={spot.id}
                 position={{ lat: spot.lat, lng: spot.lng }}
                 onClick={() => setSelectedSpot(spot)}
               />
@@ -181,7 +203,7 @@ function App() {
         )}
       </div>
 
-      {/* --- SPOTS LIST --- */}
+      {/* LIST */}
       <div className="w-full max-w-4xl mt-6 bg-white shadow-md rounded-lg p-4">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left">
@@ -193,9 +215,9 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {spots.map((spot, index) => (
+              {spots.map((spot) => (
                 <tr
-                  key={index}
+                  key={spot.id}
                   onClick={() => {
                     setSelectedSpot(spot);
                     if (mapRef.current) {
@@ -203,9 +225,10 @@ function App() {
                       mapRef.current.setZoom(15);
                     }
                   }}
+                  className="cursor-pointer border-t hover:bg-gray-50"
                 >
                   <td className="px-4 py-2">
-                    <a href={spot.videoUrl} target="_blank" className="text-blue-500 underline">
+                    <a href={spot.videoUrl} target="_blank" className="text-blue-500 underline" onClick={(e) => e.stopPropagation()}>
                       {spot.spotName}
                     </a>
                   </td>
@@ -215,7 +238,7 @@ function App() {
                       className="text-red-500 hover:underline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        removeSpot(index);
+                        removeSpot(spot);
                       }}
                     >
                       Remove
@@ -223,6 +246,13 @@ function App() {
                   </td>
                 </tr>
               ))}
+              {!spots.length && (
+                <tr className="border-t">
+                  <td className="px-4 py-4 text-gray-500" colSpan={3}>
+                    No spots yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
