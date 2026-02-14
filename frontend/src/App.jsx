@@ -4,7 +4,7 @@ import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-map
 
 function App() {
   const env = import.meta.env;
-  const API_BASE = env.VITE_API_BASE_URL;
+  const API_BASE = env.DEV ? "/api" : env.VITE_API_BASE_URL;
 
   const [videoUrl, setVideoUrl] = useState('');
   const [spotName, setSpotName] = useState('');
@@ -22,18 +22,22 @@ function App() {
 
   // ✅ Load spots from AWS on start
   useEffect(() => {
-    const load = async () => {
+    const loadSpots = async () => {
       try {
         const res = await fetch(`${API_BASE}/spots`);
-        if (!res.ok) throw new Error(`GET /spots failed: ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
         const data = await res.json();
-        setSpots(data);
-      } catch (e) {
-        console.error(e);
+
+        // ✅ support both formats
+        const spotsArray = Array.isArray(data) ? data : (data.items ?? []);
+        setSpots(spotsArray);
+      } catch (err) {
+        console.error("Load spots failed:", err);
         alert("Failed to load spots from server. Check console.");
       }
     };
-    if (API_BASE) load();
+    if (API_BASE) loadSpots();
   }, [API_BASE]);
 
   const geocodeAddress = async (address) => {
