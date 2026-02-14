@@ -13,7 +13,7 @@ function App() {
   const [selectedSpot, setSelectedSpot] = useState(null);
   const mapRef = useRef(null);
 
-  const mapContainerStyle = { width: "100%", height: "400px" };
+  const mapContainerStyle = { width: "100%", height: window.innerWidth < 768 ? "300px" : "400px" };
   const defaultCenter = { lat: 10.819655, lng: 106.633310 }; // HCM
 
   const { isLoaded } = useJsApiLoader({
@@ -126,143 +126,169 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center p-6">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">
-        🍜 AnChoi — Save Food/Fun Spots
-      </h1>
+  <div className="min-h-screen bg-gray-50">
 
-      <form onSubmit={handleSubmit} className="bg-white shadow-md rounded-lg p-6 w-full max-w-md space-y-4">
-        {/* Video URL */}
-        <div>
-          <label className="block text-gray-700 font-medium mb-1">Video URL</label>
-          <input
-            type="text"
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
-            className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-          />
+    {/* HEADER */}
+    <header className="bg-white shadow-sm sticky top-0 z-10">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+        <h1 className="text-xl md:text-2xl font-bold text-gray-800">
+          🍜 AnChoi
+        </h1>
+        <span className="text-sm text-gray-500">
+          Save Food & Fun Spots
+        </span>
+      </div>
+    </header>
+
+    <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+
+      {/* FORM + MAP (Responsive layout) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* ADD SPOT CARD */}
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <h2 className="text-lg font-semibold mb-4">Add New Spot</h2>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+
+            <input
+              type="text"
+              placeholder="Video URL"
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
+            />
+
+            <input
+              type="text"
+              placeholder="Spot Name"
+              value={spotName}
+              onChange={(e) => setSpotName(e.target.value)}
+              className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
+            />
+
+            <input
+              type="text"
+              placeholder="Address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
+            />
+
+            <button
+              type="submit"
+              className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-lg font-semibold transition"
+            >
+              Save Spot
+            </button>
+          </form>
         </div>
 
-        {/* Spot Name */}
-        <div>
-          <label className="block text-gray-700 font-medium mb-1">Spot Name</label>
-          <input
-            type="text"
-            value={spotName}
-            onChange={(e) => setSpotName(e.target.value)}
-            className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-          />
+        {/* MAP CARD */}
+        <div className="bg-white rounded-xl shadow-md overflow-hidden">
+          {isLoaded ? (
+            <GoogleMap
+              mapContainerStyle={{ width: "100%", height: "350px" }}
+              center={defaultCenter}
+              zoom={12}
+              onLoad={(map) => (mapRef.current = map)}
+            >
+              {spots.map((spot) => (
+                <Marker
+                  key={spot.id}
+                  position={{ lat: spot.lat, lng: spot.lng }}
+                  onClick={() => setSelectedSpot(spot)}
+                />
+              ))}
+
+              {selectedSpot && (
+                <InfoWindow
+                  position={{
+                    lat: selectedSpot.lat,
+                    lng: selectedSpot.lng,
+                  }}
+                  onCloseClick={() => setSelectedSpot(null)}
+                >
+                  <div>
+                    <h3 className="font-bold">
+                      {selectedSpot.spotName}
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      {selectedSpot.address}
+                    </p>
+                  </div>
+                </InfoWindow>
+              )}
+            </GoogleMap>
+          ) : (
+            <div className="p-6">Loading map...</div>
+          )}
         </div>
 
-        {/* Address */}
-        <div>
-          <label className="block text-gray-700 font-medium mb-1">Address</label>
-          <input
-            type="text"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-          />
-        </div>
+      </div>
 
-        <button type="submit" className="w-full bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600 transition">
-          Save Spot
-        </button>
-      </form>
+      {/* SPOT LIST */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4">Your Spots</h2>
 
-      {/* MAP */}
-      <div className="w-full max-w-4xl mt-6 bg-white shadow-md rounded-lg p-4">
-        {isLoaded ? (
-          <GoogleMap
-            mapContainerStyle={mapContainerStyle}
-            center={defaultCenter}
-            zoom={12}
-            onLoad={(map) => (mapRef.current = map)}
-          >
-            {spots.map((spot) => (
-              <Marker
-                key={spot.id}
-                position={{ lat: spot.lat, lng: spot.lng }}
-                onClick={() => setSelectedSpot(spot)}
-              />
-            ))}
-
-            {selectedSpot && (
-              <InfoWindow
-                position={{ lat: selectedSpot.lat, lng: selectedSpot.lng }}
-                onCloseClick={() => setSelectedSpot(null)}
-              >
-                <div className="text-sm">
-                  <h3 className="font-bold">{selectedSpot.spotName}</h3>
-                  <p className="text-gray-600">{selectedSpot.address}</p>
-                  <a href={selectedSpot.videoUrl} target="_blank" className="text-blue-500 underline">
-                    Watch video
-                  </a>
-                </div>
-              </InfoWindow>
-            )}
-          </GoogleMap>
+        {spots.length === 0 ? (
+          <div className="text-gray-500 text-center py-10">
+            No spots yet.
+          </div>
         ) : (
-          <div>Loading Map...</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {spots.map((spot) => (
+              <div
+                key={spot.id}
+                className="bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition cursor-pointer"
+                onClick={() => {
+                  setSelectedSpot(spot);
+                  if (mapRef.current) {
+                    mapRef.current.panTo({
+                      lat: spot.lat,
+                      lng: spot.lng,
+                    });
+                    mapRef.current.setZoom(15);
+                  }
+                }}
+              >
+                <h3 className="font-semibold text-gray-800">
+                  {spot.spotName}
+                </h3>
+
+                <p className="text-sm text-gray-500 mt-1">
+                  {spot.address}
+                </p>
+
+                <div className="flex justify-between items-center mt-4">
+                  <a
+                    href={spot.videoUrl}
+                    target="_blank"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-red-500 text-sm font-medium"
+                  >
+                    Watch
+                  </a>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeSpot(spot);
+                    }}
+                    className="text-sm text-gray-400 hover:text-red-500"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* LIST */}
-      <div className="w-full max-w-4xl mt-6 bg-white shadow-md rounded-lg p-4">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left">
-            <thead>
-              <tr>
-                <th className="px-4 py-2">Spot Name</th>
-                <th className="px-4 py-2">Address</th>
-                <th className="px-4 py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {spots.map((spot) => (
-                <tr
-                  key={spot.id}
-                  onClick={() => {
-                    setSelectedSpot(spot);
-                    if (mapRef.current) {
-                      mapRef.current.panTo({ lat: spot.lat, lng: spot.lng });
-                      mapRef.current.setZoom(15);
-                    }
-                  }}
-                  className="cursor-pointer border-t hover:bg-gray-50"
-                >
-                  <td className="px-4 py-2">
-                    <a href={spot.videoUrl} target="_blank" className="text-blue-500 underline" onClick={(e) => e.stopPropagation()}>
-                      {spot.spotName}
-                    </a>
-                  </td>
-                  <td className="px-4 py-2">{spot.address}</td>
-                  <td className="px-4 py-2">
-                    <button
-                      className="text-red-500 hover:underline"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeSpot(spot);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!spots.length && (
-                <tr className="border-t">
-                  <td className="px-4 py-4 text-gray-500" colSpan={3}>
-                    No spots yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
-  );
+  </div>
+);
 }
 
 export default App;
