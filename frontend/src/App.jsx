@@ -11,7 +11,9 @@ export default function App() {
   // https://anchoi.relifes.net/?plan=<planId>
   const [sharedPlanId, setSharedPlanId] = useState(null);
   const [isLoadingSharedPlan, setIsLoadingSharedPlan] = useState(false);
-  const isPublicView = !!sharedPlanId; // shared link => read-only (until we implement login)
+  const isPublicView = !!sharedPlanId; // viewing a shared link
+  const canWriteServer = !isPublicView; // until we implement login/auth
+  const canEditPlan = true; // public users can interact locally (not saved)
 
   // -------- Form state --------
   const [videoUrl, setVideoUrl] = useState("");
@@ -221,7 +223,7 @@ export default function App() {
 
   // ---------- Plan actions (disabled in public view) ----------
   const addToPlan = (spot) => {
-    if (isPublicView) return;
+    if (!canEditPlan) return;
     setPlanItems((prev) => {
       if (prev.some((x) => x.spotId === spot.id)) return prev;
       return [...prev, { spotId: spot.id, visited: false }];
@@ -229,20 +231,20 @@ export default function App() {
   };
 
   const toggleVisited = (spotId) => {
-    if (isPublicView) return;
+    if (!canEditPlan) return;
     setPlanItems((prev) =>
       prev.map((x) => (x.spotId === spotId ? { ...x, visited: !x.visited } : x))
     );
   };
 
   const removeFromPlan = (spotId) => {
-    if (isPublicView) return;
+    if (!canEditPlan) return;
     setPlanItems((prev) => prev.filter((x) => x.spotId !== spotId));
     if (selectedSpot?.id === spotId) setSelectedSpot(null);
   };
 
   const autoOrderPlan = async () => {
-    if (isPublicView) return;
+    if (!canEditPlan) return;
 
     const getStart = () =>
       new Promise((resolve) => {
@@ -296,7 +298,7 @@ export default function App() {
   // ---------- Create spot (optimistic) (disabled in public view) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (isPublicView) return;
+    if (!canWriteServer) return;
     if (isSaving) return;
 
     const name = spotName.trim();
@@ -379,7 +381,7 @@ export default function App() {
   };
 
   const removeSpot = async (spot) => {
-    if (isPublicView) return;
+    if (!canWriteServer) return;
 
     if (spot._optimistic) {
       setSpots((prev) => prev.filter((s) => s.id !== spot.id));
@@ -408,7 +410,7 @@ export default function App() {
 
   // ---------- Save plan (Step 1) (disabled in public view) ----------
   const savePlan = async () => {
-    if (isPublicView) return;
+    if (!canWriteServer) return;
 
     if (!API_BASE) {
       alert("Missing API base URL.");
@@ -509,9 +511,8 @@ export default function App() {
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
-                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                  }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                    }`}
                 />
               </div>
 
@@ -522,9 +523,8 @@ export default function App() {
                   value={spotName}
                   onChange={(e) => setSpotName(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
-                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                  }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                    }`}
                 />
               </div>
 
@@ -535,9 +535,8 @@ export default function App() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
-                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                  }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                    }`}
                 />
               </div>
 
@@ -545,11 +544,10 @@ export default function App() {
                 type="submit"
                 disabled={isPublicView || isSaving}
                 title={isPublicView ? "Login required" : ""}
-                className={`w-full py-3 rounded-xl font-semibold transition ${
-                  isPublicView || isSaving
-                    ? "bg-gray-300 text-gray-700 cursor-not-allowed"
-                    : "bg-red-500 text-white hover:bg-red-600"
-                }`}
+                className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || isSaving
+                  ? "bg-gray-300 text-gray-700 cursor-not-allowed"
+                  : "bg-red-500 text-white hover:bg-red-600"
+                  }`}
               >
                 {isPublicView ? "Login to add spots" : isSaving ? "Saving…" : "Save spot"}
               </button>
@@ -641,7 +639,7 @@ export default function App() {
               <button
                 onClick={autoOrderPlan}
                 className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
-                disabled={isPublicView || planItems.length < 2}
+                disabled={!canEditPlan || planItems.length < 2}
                 title={isPublicView ? "Login required" : planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
               >
                 Optimize
@@ -649,15 +647,14 @@ export default function App() {
 
               <button
                 onClick={() => setFollowMode((v) => !v)}
-                disabled={isPublicView}
+                disabled={!canEditPlan}
                 title={isPublicView ? "Login required" : ""}
-                className={`text-xs px-3 py-2 rounded-xl transition ${
-                  isPublicView
-                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                    : followMode
+                className={`text-xs px-3 py-2 rounded-xl transition ${isPublicView
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : followMode
                     ? "bg-red-500 text-white"
                     : "border bg-gray-50 hover:bg-gray-100"
-                }`}
+                  }`}
               >
                 {followMode ? "Following" : "Follow"}
               </button>
@@ -680,9 +677,8 @@ export default function App() {
                   <div
                     key={item.spotId}
                     onClick={() => focusSpot(spot)}
-                    className={`p-4 rounded-2xl border transition cursor-pointer ${
-                      item.visited ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200 hover:bg-gray-100"
-                    }`}
+                    className={`p-4 rounded-2xl border transition cursor-pointer ${item.visited ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -714,15 +710,14 @@ export default function App() {
                             e.stopPropagation();
                             toggleVisited(item.spotId);
                           }}
-                          disabled={isPublicView}
+                          disabled={!canEditPlan}
                           title={isPublicView ? "Login required" : ""}
-                          className={`text-xs px-3 py-2 rounded-xl ${
-                            isPublicView
-                              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                              : item.visited
+                          className={`text-xs px-3 py-2 rounded-xl ${isPublicView
+                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            : item.visited
                               ? "bg-green-600 text-white"
                               : "bg-white border hover:bg-gray-50"
-                          }`}
+                            }`}
                         >
                           {item.visited ? "✓" : "Done"}
                         </button>
@@ -732,11 +727,10 @@ export default function App() {
                             e.stopPropagation();
                             removeFromPlan(item.spotId);
                           }}
-                          disabled={isPublicView}
+                          disabled={!canEditPlan}
                           title={isPublicView ? "Login required" : ""}
-                          className={`text-xs ${
-                            isPublicView ? "text-gray-400 cursor-not-allowed" : "text-red-500 hover:text-red-600"
-                          }`}
+                          className={`text-xs ${isPublicView ? "text-gray-400 cursor-not-allowed" : "text-red-500 hover:text-red-600"
+                            }`}
                         >
                           Remove
                         </button>
@@ -757,9 +751,8 @@ export default function App() {
                 onChange={(e) => setPlanName(e.target.value)}
                 placeholder="e.g. HCM Food Day 1"
                 disabled={isPublicView}
-                className={`mt-1 w-full border rounded-xl p-3 outline-none ${
-                  isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                }`}
+                className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
               />
               {savedPlan?.shareUrl && (
                 <div className="mt-2 text-xs text-gray-600">
@@ -788,15 +781,14 @@ export default function App() {
 
             <button
               onClick={savePlan}
-              disabled={isPublicView || isSavingPlan || planItems.length === 0}
+              disabled={!canWriteServer || isSavingPlan || planItems.length === 0}
               title={isPublicView ? "Login required" : ""}
-              className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${
-                isPublicView || isSavingPlan || planItems.length === 0
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-red-500 text-white hover:bg-red-600"
-              }`}
+              className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${isPublicView || isSavingPlan || planItems.length === 0
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-red-500 text-white hover:bg-red-600"
+                }`}
             >
-              {isPublicView ? "Login to save" : isSavingPlan ? "Saving plan…" : "Save plan"}
+              {isPublicView ? "Saving disabled on public link" : isSavingPlan ? "Saving plan…" : "Save plan"}
             </button>
           </div>
 
@@ -804,9 +796,8 @@ export default function App() {
             <button
               onClick={focusNextUnvisited}
               disabled={unvisitedCount === 0}
-              className={`w-full py-3 rounded-xl font-semibold transition ${
-                unvisitedCount === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:bg-black"
-              }`}
+              className={`w-full py-3 rounded-xl font-semibold transition ${unvisitedCount === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:bg-black"
+                }`}
             >
               Next unvisited
             </button>
@@ -822,11 +813,10 @@ export default function App() {
               }}
               disabled={isPublicView || planItems.length === 0}
               title={isPublicView ? "Login required" : ""}
-              className={`w-full py-3 rounded-xl font-semibold transition ${
-                isPublicView || planItems.length === 0
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "border bg-white hover:bg-gray-50"
-              }`}
+              className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || planItems.length === 0
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "border bg-white hover:bg-gray-50"
+                }`}
             >
               {isPublicView ? "Login to edit" : "Clear plan"}
             </button>
@@ -856,9 +846,8 @@ export default function App() {
                   <div
                     key={spot.id}
                     onClick={() => focusSpot(spot)}
-                    className={`bg-white rounded-2xl shadow-md p-5 space-y-3 transition hover:shadow-lg cursor-pointer ${
-                      spot._optimistic ? "border border-yellow-200" : ""
-                    }`}
+                    className={`bg-white rounded-2xl shadow-md p-5 space-y-3 transition hover:shadow-lg cursor-pointer ${spot._optimistic ? "border border-yellow-200" : ""
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -873,13 +862,12 @@ export default function App() {
                         }}
                         disabled={isPublicView || inPlan}
                         title={isPublicView ? "Login required" : ""}
-                        className={`text-xs px-3 py-2 rounded-full font-medium transition ${
-                          isPublicView
-                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                            : inPlan
+                        className={`text-xs px-3 py-2 rounded-full font-medium transition ${isPublicView
+                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                          : inPlan
                             ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                             : "bg-red-100 text-red-600 hover:bg-red-200"
-                        }`}
+                          }`}
                       >
                         {isPublicView ? "Login to add" : inPlan ? "Added" : "Add"}
                       </button>
@@ -903,9 +891,8 @@ export default function App() {
                         }}
                         disabled={isPublicView}
                         title={isPublicView ? "Login required" : ""}
-                        className={`text-sm ${
-                          isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
-                        }`}
+                        className={`text-sm ${isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
+                          }`}
                       >
                         Delete
                       </button>
