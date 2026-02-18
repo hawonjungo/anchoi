@@ -2,23 +2,30 @@ import "./App.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-maps/api";
 
-function App() {
+export default function App() {
   const env = import.meta.env;
   const API_BASE = env.VITE_API_BASE_URL;
 
+  // -------- Form state --------
   const [videoUrl, setVideoUrl] = useState("");
   const [spotName, setSpotName] = useState("");
   const [address, setAddress] = useState("");
 
+  // -------- Data state --------
   const [spots, setSpots] = useState([]);
   const [selectedSpot, setSelectedSpot] = useState(null);
 
+  // -------- Phase 2: Plan state --------
+  // planItems: [{ spotId: string, visited: boolean }]
+  const [planItems, setPlanItems] = useState([]);
+  const [followMode, setFollowMode] = useState(false);
+
+  // -------- UX state --------
   const [isLoadingSpots, setIsLoadingSpots] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // -------- Refs --------
   const mapRef = useRef(null);
-
-  // ✅ Cache geocode results in memory (address -> {lat,lng,formattedAddress})
   const geoCacheRef = useRef(new Map());
 
   const defaultCenter = useMemo(() => ({ lat: 10.819655, lng: 106.63331 }), []); // HCM
@@ -27,7 +34,63 @@ function App() {
     googleMapsApiKey: env.VITE_GOOGLE_MAPS_API_KEY,
   });
 
-  // ✅ Load spots on start
+  // ---------- Helpers ----------
+  const getSpotById = (id) => spots.find((s) => s.id === id);
+
+  // Haversine distance (km)
+  const haversineKm = (a, b) => {
+    const R = 6371;
+    const toRad = (x) => (x * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+
+  // Nearest-neighbor ordering
+  const orderByNearest = (start, spotList) => {
+    const remaining = [...spotList];
+    const ordered = [];
+    let current = start;
+
+    while (remaining.length) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const d = haversineKm(current, remaining[i]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+
+      const next = remaining.splice(bestIdx, 1)[0];
+      ordered.push(next);
+      current = next;
+    }
+
+    return ordered;
+  };
+
+  const focusSpot = (spot) => {
+    setSelectedSpot(spot);
+  };
+
+  const focusNextUnvisited = () => {
+    const next = planItems.find((x) => !x.visited);
+    if (!next) return;
+    const spot = getSpotById(next.spotId);
+    if (spot) focusSpot(spot);
+  };
+
+  // ---------- Load spots ----------
   useEffect(() => {
     if (!API_BASE) return;
 
@@ -51,7 +114,7 @@ function App() {
     loadSpots();
   }, [API_BASE]);
 
-  // ✅ Pan/zoom AFTER selectedSpot changes (fix double click)
+  // ---------- Pan/zoom AFTER selectedSpot updates ----------
   useEffect(() => {
     if (!selectedSpot || !mapRef.current) return;
     const map = mapRef.current;
@@ -59,12 +122,62 @@ function App() {
     map.setZoom(15);
   }, [selectedSpot]);
 
+  // ---------- Follow mode: focus next unvisited ----------
+  useEffect(() => {
+    if (!followMode) return;
+    focusNextUnvisited();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followMode, planItems]);
+
+  // ---------- Plan actions ----------
+  const addToPlan = (spot) => {
+    setPlanItems((prev) => {
+      if (prev.some((x) => x.spotId === spot.id)) return prev;
+      return [...prev, { spotId: spot.id, visited: false }];
+    });
+  };
+
+  const toggleVisited = (spotId) => {
+    setPlanItems((prev) =>
+      prev.map((x) => (x.spotId === spotId ? { ...x, visited: !x.visited } : x))
+    );
+  };
+
+  const removeFromPlan = (spotId) => {
+    setPlanItems((prev) => prev.filter((x) => x.spotId !== spotId));
+    if (selectedSpot?.id === spotId) setSelectedSpot(null);
+  };
+
+  const autoOrderPlan = async () => {
+    const getStart = () =>
+      new Promise((resolve) => {
+        if (!navigator.geolocation) return resolve(defaultCenter);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve(defaultCenter),
+          { enableHighAccuracy: true, timeout: 6000 }
+        );
+      });
+
+    const start = await getStart();
+
+    const planSpots = planItems.map((x) => getSpotById(x.spotId)).filter(Boolean);
+    if (planSpots.length <= 1) return;
+
+    const ordered = orderByNearest(start, planSpots);
+
+    setPlanItems((prev) => {
+      const visitedMap = new Map(prev.map((x) => [x.spotId, x.visited]));
+      return ordered.map((s) => ({ spotId: s.id, visited: visitedMap.get(s.id) ?? false }));
+    });
+  };
+
+  // ---------- Geocode (server) ----------
   const geocodeAddress = async (rawAddress) => {
     try {
       const key = rawAddress.trim().toLowerCase();
       if (!key) return null;
 
-      // ✅ cache hit
       if (geoCacheRef.current.has(key)) return geoCacheRef.current.get(key);
 
       const res = await fetch(`${API_BASE}/geocode`, {
@@ -73,19 +186,10 @@ function App() {
         body: JSON.stringify({ address: rawAddress }),
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.error("Geocode failed:", res.status, text);
-        return null;
-      }
+      if (!res.ok) return null;
 
       const data = await res.json();
-      const result = {
-        lat: data.lat,
-        lng: data.lng,
-        formattedAddress: data.formattedAddress,
-      };
-
+      const result = { lat: data.lat, lng: data.lng, formattedAddress: data.formattedAddress };
       geoCacheRef.current.set(key, result);
       return result;
     } catch (err) {
@@ -94,10 +198,10 @@ function App() {
     }
   };
 
+  // ---------- Create spot (optimistic) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (isSaving) return; // prevent double submit
+    if (isSaving) return;
 
     const name = spotName.trim();
     const url = videoUrl.trim();
@@ -110,14 +214,13 @@ function App() {
 
     setIsSaving(true);
 
-    // ✅ Optimistic spot shows instantly
     const optimisticId = `optimistic-${crypto.randomUUID()}`;
     const optimisticSpot = {
       id: optimisticId,
       spotName: name,
       videoUrl: url,
       address: addr,
-      lat: defaultCenter.lat, // temp; will update after geocode
+      lat: defaultCenter.lat,
       lng: defaultCenter.lng,
       _optimistic: true,
     };
@@ -126,31 +229,22 @@ function App() {
     setSelectedSpot(optimisticSpot);
 
     try {
-      // 1) geocode
       const location = await geocodeAddress(addr);
       if (!location) {
-        // remove optimistic
         setSpots((prev) => prev.filter((s) => s.id !== optimisticId));
         setSelectedSpot(null);
         alert("Could not find location. Please check the address.");
         return;
       }
 
-      // Update optimistic marker to real coords immediately (still optimistic)
+      // update optimistic coords
       setSpots((prev) =>
-        prev.map((s) =>
-          s.id === optimisticId
-            ? { ...s, lat: location.lat, lng: location.lng }
-            : s
-        )
+        prev.map((s) => (s.id === optimisticId ? { ...s, lat: location.lat, lng: location.lng } : s))
       );
       setSelectedSpot((prev) =>
-        prev?.id === optimisticId
-          ? { ...prev, lat: location.lat, lng: location.lng }
-          : prev
+        prev?.id === optimisticId ? { ...prev, lat: location.lat, lng: location.lng } : prev
       );
 
-      // 2) save to DB
       const payload = {
         spotName: name,
         videoUrl: url,
@@ -172,17 +266,17 @@ function App() {
 
       const created = await res.json();
 
-      // Replace optimistic with real created item
       setSpots((prev) => prev.map((s) => (s.id === optimisticId ? created : s)));
       setSelectedSpot((prev) => (prev?.id === optimisticId ? created : prev));
 
-      // Clear inputs
+      // Optional: auto-add to plan
+      // addToPlan(created);
+
       setSpotName("");
       setVideoUrl("");
       setAddress("");
     } catch (err) {
       console.error(err);
-      // Remove optimistic if request failed
       setSpots((prev) => prev.filter((s) => s.id !== optimisticId));
       setSelectedSpot(null);
       alert("Failed to save spot. Check console.");
@@ -192,9 +286,9 @@ function App() {
   };
 
   const removeSpot = async (spot) => {
-    // If it's optimistic, just remove locally
     if (spot._optimistic) {
       setSpots((prev) => prev.filter((s) => s.id !== spot.id));
+      setPlanItems((prev) => prev.filter((x) => x.spotId !== spot.id));
       if (selectedSpot?.id === spot.id) setSelectedSpot(null);
       return;
     }
@@ -207,6 +301,7 @@ function App() {
       }
 
       setSpots((prev) => prev.filter((s) => s.id !== spot.id));
+      setPlanItems((prev) => prev.filter((x) => x.spotId !== spot.id));
       if (selectedSpot?.id === spot.id) setSelectedSpot(null);
     } catch (err) {
       console.error(err);
@@ -214,178 +309,344 @@ function App() {
     }
   };
 
+  const unvisitedCount = planItems.filter((x) => !x.visited).length;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-24">
       {/* HEADER */}
-      <header className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-800">🍜 AnChoi</h1>
-          <span className="text-sm text-gray-500">Save Food & Fun Spots</span>
+      <header className="bg-white border-b sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">AnChoi</h1>
+            <p className="text-xs text-gray-500">Eat • Explore • Plan</p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {isLoadingSpots ? "Loading…" : `${spots.length} spots`}
+          </div>
         </div>
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {/* FORM + MAP */}
+        {/* Top: Form + Map */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* FORM */}
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-lg font-semibold mb-4">Add New Spot</h2>
+          <div className="bg-white rounded-2xl shadow-md p-5">
+            <h2 className="text-lg font-semibold text-gray-900">Add new spot</h2>
+            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600">Video URL</label>
+                <input
+                  type="text"
+                  placeholder="https://…"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                />
+              </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <input
-                type="text"
-                placeholder="Video URL"
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
-              />
+              <div>
+                <label className="text-xs font-medium text-gray-600">Spot name</label>
+                <input
+                  type="text"
+                  value={spotName}
+                  onChange={(e) => setSpotName(e.target.value)}
+                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                />
+              </div>
 
-              <input
-                type="text"
-                placeholder="Spot Name"
-                value={spotName}
-                onChange={(e) => setSpotName(e.target.value)}
-                className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
-              />
-
-              <input
-                type="text"
-                placeholder="Address"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full border rounded-lg p-3 focus:ring-2 focus:ring-red-400 outline-none"
-              />
+              <div>
+                <label className="text-xs font-medium text-gray-600">Address</label>
+                <input
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                />
+              </div>
 
               <button
                 type="submit"
                 disabled={isSaving}
-                className={`w-full py-3 rounded-lg font-semibold transition ${
-                  isSaving
-                    ? "bg-gray-400 cursor-not-allowed text-white"
-                    : "bg-red-500 hover:bg-red-600 text-white"
+                className={`w-full py-3 rounded-xl font-semibold transition ${
+                  isSaving ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-red-500 text-white hover:bg-red-600"
                 }`}
               >
-                {isSaving ? "Saving..." : "Save Spot"}
+                {isSaving ? "Saving…" : "Save spot"}
               </button>
-            </form>
 
-            {!API_BASE && (
-              <p className="mt-4 text-sm text-red-500">
-                Missing VITE_API_BASE_URL. Set it in GitHub Secrets and redeploy.
-              </p>
-            )}
+              {!API_BASE && (
+                <p className="text-sm text-red-500">
+                  Missing <b>VITE_API_BASE_URL</b>. Set it in GitHub Secrets and redeploy.
+                </p>
+              )}
+            </form>
           </div>
 
           {/* MAP */}
-          <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            {isLoaded ? (
-              <GoogleMap
-                mapContainerStyle={{ width: "100%", height: "350px" }}
-                center={defaultCenter}
-                zoom={12}
-                onLoad={(map) => {
-                  mapRef.current = map;
-                }}
-              >
-                {spots.map((spot) => (
-                  <Marker
-                    key={spot.id}
-                    position={{ lat: spot.lat, lng: spot.lng }}
-                    onClick={() => setSelectedSpot(spot)}
-                  />
-                ))}
+          <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Map</h2>
+              {followMode && (
+                <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full">Follow mode</span>
+              )}
+            </div>
 
-                {selectedSpot && (
-                  <InfoWindow
-                    position={{ lat: selectedSpot.lat, lng: selectedSpot.lng }}
-                    onCloseClick={() => setSelectedSpot(null)}
+            {isLoaded ? (
+              <div className="px-5 pb-5">
+                <div className="rounded-2xl overflow-hidden shadow-sm border">
+                  <GoogleMap
+                    mapContainerStyle={{ width: "100%", height: "680px" }}
+                    center={defaultCenter}
+                    zoom={12}
+                    onLoad={(map) => {
+                      mapRef.current = map;
+                    }}
                   >
-                    <div className="text-sm">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold">{selectedSpot.spotName}</h3>
-                        {selectedSpot._optimistic && (
-                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
-                            Saving...
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-gray-600">{selectedSpot.address}</p>
-                      <a
-                        href={selectedSpot.videoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-red-500 underline"
+                    {spots.map((spot) => (
+                      <Marker
+                        key={spot.id}
+                        position={{ lat: spot.lat, lng: spot.lng }}
+                        onClick={() => setSelectedSpot(spot)}
+                      />
+                    ))}
+
+                    {selectedSpot && (
+                      <InfoWindow
+                        position={{ lat: selectedSpot.lat, lng: selectedSpot.lng }}
+                        onCloseClick={() => setSelectedSpot(null)}
                       >
-                        Watch video
-                      </a>
-                    </div>
-                  </InfoWindow>
-                )}
-              </GoogleMap>
+                        <div className="text-sm">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold">{selectedSpot.spotName}</h3>
+                            {selectedSpot._optimistic && (
+                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">Saving…</span>
+                            )}
+                          </div>
+                          <p className="text-gray-600">{selectedSpot.address}</p>
+                          <a
+                            href={selectedSpot.videoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-red-500 underline"
+                          >
+                            Watch video
+                          </a>
+                        </div>
+                      </InfoWindow>
+                    )}
+                  </GoogleMap>
+                </div>
+              </div>
             ) : (
-              <div className="p-6">Loading map...</div>
+              <div className="p-6">Loading map…</div>
             )}
           </div>
         </div>
 
-        {/* LIST */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Your Spots</h2>
+        {/* TODAY PLAN */}
+        <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Today’s plan</h2>
+              <p className="text-sm text-gray-500 mt-1">Add spots, optimize, then tick them off as you go.</p>
+            </div>
+
+            <div className="flex flex-col gap-2 items-end">
+              <button
+                onClick={autoOrderPlan}
+                className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                disabled={planItems.length < 2}
+                title={planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
+              >
+                Optimize
+              </button>
+
+              <button
+                onClick={() => setFollowMode((v) => !v)}
+                className={`text-xs px-3 py-2 rounded-xl transition ${
+                  followMode ? "bg-red-500 text-white" : "border bg-gray-50 hover:bg-gray-100"
+                }`}
+              >
+                {followMode ? "Following" : "Follow"}
+              </button>
+            </div>
+          </div>
+
+          {planItems.length === 0 ? (
+            <div className="text-sm text-gray-400">No spots in plan yet. Tap <b>Add</b> from your spots list.</div>
+          ) : (
+            <div className="space-y-3">
+              {planItems.map((item, index) => {
+                const spot = getSpotById(item.spotId);
+                if (!spot) return null;
+
+                return (
+                  <div
+                    key={item.spotId}
+                    onClick={() => focusSpot(spot)}
+                    className={`p-4 rounded-2xl border transition cursor-pointer ${
+                      item.visited ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">
+                          {index + 1}. {spot.spotName}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1 truncate">{spot.address}</p>
+
+                        <div className="mt-3 flex items-center gap-2">
+                          <a
+                            href={spot.videoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-red-500 underline"
+                          >
+                            Watch
+                          </a>
+
+                          {item.visited && (
+                            <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full">Visited</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-2 shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleVisited(item.spotId);
+                          }}
+                          className={`text-xs px-3 py-2 rounded-xl ${
+                            item.visited ? "bg-green-600 text-white" : "bg-white border hover:bg-gray-50"
+                          }`}
+                        >
+                          {item.visited ? "✓" : "Done"}
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromPlan(item.spotId);
+                          }}
+                          className="text-xs text-red-500 hover:text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={focusNextUnvisited}
+              disabled={unvisitedCount === 0}
+              className={`w-full py-3 rounded-xl font-semibold transition ${
+                unvisitedCount === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:bg-black"
+              }`}
+            >
+              Next unvisited
+            </button>
+
+            <button
+              onClick={() => {
+                setPlanItems([]);
+                setFollowMode(false);
+              }}
+              disabled={planItems.length === 0}
+              className={`w-full py-3 rounded-xl font-semibold transition ${
+                planItems.length === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "border bg-white hover:bg-gray-50"
+              }`}
+            >
+              Clear plan
+            </button>
+          </div>
+        </div>
+
+        {/* SPOTS */}
+        <div className="space-y-3">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Your spots</h2>
+              <p className="text-sm text-gray-500">Tap a card to focus the map. Add it to today’s plan.</p>
+            </div>
             {isLoadingSpots && <span className="text-sm text-gray-500">Loading…</span>}
           </div>
 
           {spots.length === 0 ? (
-            <div className="text-gray-500 text-center py-10">No spots yet.</div>
+            <div className="text-gray-500 text-center py-10 bg-white rounded-2xl shadow-md">No spots yet.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {spots.map((spot) => (
-                <div
-                  key={spot.id}
-                  className={`bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition cursor-pointer ${
-                    spot._optimistic ? "border border-yellow-200" : ""
-                  }`}
-                  onClick={() => setSelectedSpot(spot)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="font-semibold text-gray-800">{spot.spotName}</h3>
+              {spots.map((spot) => {
+                const inPlan = planItems.some((x) => x.spotId === spot.id);
+
+                return (
+                  <div
+                    key={spot.id}
+                    onClick={() => focusSpot(spot)}
+                    className={`bg-white rounded-2xl shadow-md p-5 space-y-3 transition hover:shadow-lg cursor-pointer ${
+                      spot._optimistic ? "border border-yellow-200" : ""
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">{spot.spotName}</h3>
+                        <p className="text-sm text-gray-500 mt-1 line-clamp-2">{spot.address}</p>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToPlan(spot);
+                        }}
+                        disabled={inPlan}
+                        className={`text-xs px-3 py-2 rounded-full font-medium transition ${
+                          inPlan ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-red-100 text-red-600 hover:bg-red-200"
+                        }`}
+                      >
+                        {inPlan ? "Added" : "Add"}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <a
+                        href={spot.videoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sm text-red-500 underline"
+                      >
+                        Watch
+                      </a>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeSpot(spot);
+                        }}
+                        className="text-sm text-gray-400 hover:text-red-500"
+                      >
+                        Delete
+                      </button>
+                    </div>
+
                     {spot._optimistic && (
-                      <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                      <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2">
                         Saving…
-                      </span>
+                      </div>
                     )}
                   </div>
-
-                  <p className="text-sm text-gray-500 mt-1">{spot.address}</p>
-
-                  <div className="flex justify-between items-center mt-4">
-                    <a
-                      href={spot.videoUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-red-500 text-sm font-medium"
-                    >
-                      Watch
-                    </a>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeSpot(spot);
-                      }}
-                      className="text-sm text-gray-400 hover:text-red-500"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* FOOTER */}
         <footer className="text-center text-xs text-gray-400 py-6">
           © {new Date().getFullYear()} AnChoi • AWS (Lambda + API Gateway + DynamoDB)
         </footer>
@@ -393,5 +654,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
