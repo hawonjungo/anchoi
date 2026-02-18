@@ -6,6 +6,13 @@ export default function App() {
   const env = import.meta.env;
   const API_BASE = env.VITE_API_BASE_URL;
 
+  // -------- Public share (read-only) --------
+  // Use query param to avoid static hosting SPA routing issues:
+  // https://anchoi.relifes.net/?plan=<planId>
+  const [sharedPlanId, setSharedPlanId] = useState(null);
+  const [isLoadingSharedPlan, setIsLoadingSharedPlan] = useState(false);
+  const isPublicView = !!sharedPlanId; // shared link => read-only (until we implement login)
+
   // -------- Form state --------
   const [videoUrl, setVideoUrl] = useState("");
   const [spotName, setSpotName] = useState("");
@@ -100,6 +107,57 @@ export default function App() {
     if (spot) focusSpot(spot);
   };
 
+  // ---------- Read shared plan id from URL ----------
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const planId = sp.get("plan");
+    setSharedPlanId(planId);
+  }, []);
+
+  // ---------- Load shared plan (read-only) ----------
+  const loadSharedPlan = async (planId) => {
+    if (!API_BASE || !planId) return;
+
+    setIsLoadingSharedPlan(true);
+    try {
+      // Requires backend route: GET /public/plans/{planId}
+      const res = await fetch(`${API_BASE}/public/plans/${encodeURIComponent(planId)}`);
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`GET public plan failed: ${res.status} ${t}`);
+      }
+
+      const data = await res.json();
+      setPlanName(data?.name ?? "Shared plan");
+
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const normalized = items
+        .map((x) => ({
+          spotId: x.spotId,
+          visited: !!x.visited,
+          order: typeof x.order === "number" ? x.order : 0,
+        }))
+        .filter((x) => typeof x.spotId === "string" && x.spotId.length > 0)
+        .sort((a, b) => a.order - b.order)
+        .map(({ spotId, visited }) => ({ spotId, visited }));
+
+      setPlanItems(normalized);
+      setSavedPlan(null);
+      setFollowMode(false);
+      setSelectedSpot(null);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to load shared plan. Check console.");
+    } finally {
+      setIsLoadingSharedPlan(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sharedPlanId) loadSharedPlan(sharedPlanId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedPlanId, API_BASE]);
+
   // ---------- Load spots ----------
   useEffect(() => {
     if (!API_BASE) return;
@@ -161,8 +219,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followMode, planItems]);
 
-  // ---------- Plan actions ----------
+  // ---------- Plan actions (disabled in public view) ----------
   const addToPlan = (spot) => {
+    if (isPublicView) return;
     setPlanItems((prev) => {
       if (prev.some((x) => x.spotId === spot.id)) return prev;
       return [...prev, { spotId: spot.id, visited: false }];
@@ -170,17 +229,21 @@ export default function App() {
   };
 
   const toggleVisited = (spotId) => {
+    if (isPublicView) return;
     setPlanItems((prev) =>
       prev.map((x) => (x.spotId === spotId ? { ...x, visited: !x.visited } : x))
     );
   };
 
   const removeFromPlan = (spotId) => {
+    if (isPublicView) return;
     setPlanItems((prev) => prev.filter((x) => x.spotId !== spotId));
     if (selectedSpot?.id === spotId) setSelectedSpot(null);
   };
 
   const autoOrderPlan = async () => {
+    if (isPublicView) return;
+
     const getStart = () =>
       new Promise((resolve) => {
         if (!navigator.geolocation) return resolve(defaultCenter);
@@ -230,9 +293,10 @@ export default function App() {
     }
   };
 
-  // ---------- Create spot (optimistic) ----------
+  // ---------- Create spot (optimistic) (disabled in public view) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isPublicView) return;
     if (isSaving) return;
 
     const name = spotName.trim();
@@ -301,9 +365,6 @@ export default function App() {
       setSpots((prev) => prev.map((s) => (s.id === optimisticId ? created : s)));
       setSelectedSpot((prev) => (prev?.id === optimisticId ? created : prev));
 
-      // Optional: auto-add to plan
-      // addToPlan(created);
-
       setSpotName("");
       setVideoUrl("");
       setAddress("");
@@ -318,6 +379,8 @@ export default function App() {
   };
 
   const removeSpot = async (spot) => {
+    if (isPublicView) return;
+
     if (spot._optimistic) {
       setSpots((prev) => prev.filter((s) => s.id !== spot.id));
       setPlanItems((prev) => prev.filter((x) => x.spotId !== spot.id));
@@ -343,8 +406,10 @@ export default function App() {
 
   const unvisitedCount = planItems.filter((x) => !x.visited).length;
 
-  // ---------- Save plan (Step 1) ----------
+  // ---------- Save plan (Step 1) (disabled in public view) ----------
   const savePlan = async () => {
+    if (isPublicView) return;
+
     if (!API_BASE) {
       alert("Missing API base URL.");
       return;
@@ -402,8 +467,13 @@ export default function App() {
             <h1 className="text-xl font-bold text-gray-900">AnChoi</h1>
             <p className="text-xs text-gray-500">Eat • Explore • Plan</p>
           </div>
-          <div className="text-xs text-gray-500">
-            {isLoadingSpots ? "Loading…" : `${spots.length} spots`}
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            {sharedPlanId && (
+              <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-full">
+                Public view
+              </span>
+            )}
+            <span>{isLoadingSpots ? "Loading…" : `${spots.length} spots`}</span>
           </div>
         </div>
       </header>
@@ -412,8 +482,24 @@ export default function App() {
         {/* Top: Form + Map */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* FORM */}
-          <div className="bg-white rounded-2xl shadow-md p-5">
-            <h2 className="text-lg font-semibold text-gray-900">Add new spot</h2>
+          <div className="bg-white rounded-2xl shadow-md p-5 relative">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Add new spot</h2>
+                {isPublicView && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    You’re viewing a shared plan. Editing is disabled until login.
+                  </p>
+                )}
+              </div>
+
+              {isPublicView && (
+                <div className="text-xs text-gray-500 text-right">
+                  {isLoadingSharedPlan ? "Loading plan…" : sharedPlanId ? `Plan: ${sharedPlanId}` : ""}
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleSubmit} className="mt-4 space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-600">Video URL</label>
@@ -422,7 +508,10 @@ export default function App() {
                   placeholder="https://…"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
-                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                  disabled={isPublicView}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
@@ -432,7 +521,10 @@ export default function App() {
                   type="text"
                   value={spotName}
                   onChange={(e) => setSpotName(e.target.value)}
-                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                  disabled={isPublicView}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
@@ -442,18 +534,24 @@ export default function App() {
                   type="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                  disabled={isPublicView}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={isSaving}
+                disabled={isPublicView || isSaving}
+                title={isPublicView ? "Login required" : ""}
                 className={`w-full py-3 rounded-xl font-semibold transition ${
-                  isSaving ? "bg-gray-300 text-gray-700 cursor-not-allowed" : "bg-red-500 text-white hover:bg-red-600"
+                  isPublicView || isSaving
+                    ? "bg-gray-300 text-gray-700 cursor-not-allowed"
+                    : "bg-red-500 text-white hover:bg-red-600"
                 }`}
               >
-                {isSaving ? "Saving…" : "Save spot"}
+                {isPublicView ? "Login to add spots" : isSaving ? "Saving…" : "Save spot"}
               </button>
 
               {!API_BASE && (
@@ -487,12 +585,12 @@ export default function App() {
                     {spots
                       .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng))
                       .map((spot) => (
-                      <Marker
-                        key={spot.id}
-                        position={{ lat: spot.lat, lng: spot.lng }}
-                        onClick={() => setSelectedSpot(spot)}
-                      />
-                    ))}
+                        <Marker
+                          key={spot.id}
+                          position={{ lat: spot.lat, lng: spot.lng }}
+                          onClick={() => setSelectedSpot(spot)}
+                        />
+                      ))}
 
                     {selectedSpot && Number.isFinite(selectedSpot.lat) && Number.isFinite(selectedSpot.lng) && (
                       <InfoWindow
@@ -503,7 +601,9 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <h3 className="font-bold">{selectedSpot.spotName}</h3>
                             {selectedSpot._optimistic && (
-                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">Saving…</span>
+                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                                Saving…
+                              </span>
                             )}
                           </div>
                           <p className="text-gray-600">{selectedSpot.address}</p>
@@ -532,23 +632,31 @@ export default function App() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Today’s plan</h2>
-              <p className="text-sm text-gray-500 mt-1">Add spots, optimize, then tick them off as you go.</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {isPublicView ? "Read-only for public links." : "Add spots, optimize, then tick them off as you go."}
+              </p>
             </div>
 
             <div className="flex flex-col gap-2 items-end">
               <button
                 onClick={autoOrderPlan}
                 className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
-                disabled={planItems.length < 2}
-                title={planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
+                disabled={isPublicView || planItems.length < 2}
+                title={isPublicView ? "Login required" : planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
               >
                 Optimize
               </button>
 
               <button
                 onClick={() => setFollowMode((v) => !v)}
+                disabled={isPublicView}
+                title={isPublicView ? "Login required" : ""}
                 className={`text-xs px-3 py-2 rounded-xl transition ${
-                  followMode ? "bg-red-500 text-white" : "border bg-gray-50 hover:bg-gray-100"
+                  isPublicView
+                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                    : followMode
+                    ? "bg-red-500 text-white"
+                    : "border bg-gray-50 hover:bg-gray-100"
                 }`}
               >
                 {followMode ? "Following" : "Follow"}
@@ -557,7 +665,11 @@ export default function App() {
           </div>
 
           {planItems.length === 0 ? (
-            <div className="text-sm text-gray-400">No spots in plan yet. Tap <b>Add</b> from your spots list.</div>
+            <div className="text-sm text-gray-400">
+              {isPublicView ? "This shared plan has no items." : (
+                <>No spots in plan yet. Tap <b>Add</b> from your spots list.</>
+              )}
+            </div>
           ) : (
             <div className="space-y-3">
               {planItems.map((item, index) => {
@@ -602,8 +714,14 @@ export default function App() {
                             e.stopPropagation();
                             toggleVisited(item.spotId);
                           }}
+                          disabled={isPublicView}
+                          title={isPublicView ? "Login required" : ""}
                           className={`text-xs px-3 py-2 rounded-xl ${
-                            item.visited ? "bg-green-600 text-white" : "bg-white border hover:bg-gray-50"
+                            isPublicView
+                              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                              : item.visited
+                              ? "bg-green-600 text-white"
+                              : "bg-white border hover:bg-gray-50"
                           }`}
                         >
                           {item.visited ? "✓" : "Done"}
@@ -614,7 +732,11 @@ export default function App() {
                             e.stopPropagation();
                             removeFromPlan(item.spotId);
                           }}
-                          className="text-xs text-red-500 hover:text-red-600"
+                          disabled={isPublicView}
+                          title={isPublicView ? "Login required" : ""}
+                          className={`text-xs ${
+                            isPublicView ? "text-gray-400 cursor-not-allowed" : "text-red-500 hover:text-red-600"
+                          }`}
                         >
                           Remove
                         </button>
@@ -634,7 +756,10 @@ export default function App() {
                 value={planName}
                 onChange={(e) => setPlanName(e.target.value)}
                 placeholder="e.g. HCM Food Day 1"
-                className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+                disabled={isPublicView}
+                className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                  isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                }`}
               />
               {savedPlan?.shareUrl && (
                 <div className="mt-2 text-xs text-gray-600">
@@ -663,14 +788,15 @@ export default function App() {
 
             <button
               onClick={savePlan}
-              disabled={isSavingPlan || planItems.length === 0}
+              disabled={isPublicView || isSavingPlan || planItems.length === 0}
+              title={isPublicView ? "Login required" : ""}
               className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${
-                isSavingPlan || planItems.length === 0
+                isPublicView || isSavingPlan || planItems.length === 0
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-red-500 text-white hover:bg-red-600"
               }`}
             >
-              {isSavingPlan ? "Saving plan…" : "Save plan"}
+              {isPublicView ? "Login to save" : isSavingPlan ? "Saving plan…" : "Save plan"}
             </button>
           </div>
 
@@ -687,18 +813,22 @@ export default function App() {
 
             <button
               onClick={() => {
+                if (isPublicView) return;
                 setPlanItems([]);
                 setFollowMode(false);
                 setSelectedSpot(null);
                 setSavedPlan(null);
                 setPlanName("");
               }}
-              disabled={planItems.length === 0}
+              disabled={isPublicView || planItems.length === 0}
+              title={isPublicView ? "Login required" : ""}
               className={`w-full py-3 rounded-xl font-semibold transition ${
-                planItems.length === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "border bg-white hover:bg-gray-50"
+                isPublicView || planItems.length === 0
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : "border bg-white hover:bg-gray-50"
               }`}
             >
-              Clear plan
+              {isPublicView ? "Login to edit" : "Clear plan"}
             </button>
           </div>
         </div>
@@ -708,7 +838,9 @@ export default function App() {
           <div className="flex items-end justify-between">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Your spots</h2>
-              <p className="text-sm text-gray-500">Tap a card to focus the map. Add it to today’s plan.</p>
+              <p className="text-sm text-gray-500">
+                Tap a card to focus the map. {isPublicView ? "Public viewers can only view." : "Add it to today’s plan."}
+              </p>
             </div>
             {isLoadingSpots && <span className="text-sm text-gray-500">Loading…</span>}
           </div>
@@ -739,12 +871,17 @@ export default function App() {
                           e.stopPropagation();
                           addToPlan(spot);
                         }}
-                        disabled={inPlan}
+                        disabled={isPublicView || inPlan}
+                        title={isPublicView ? "Login required" : ""}
                         className={`text-xs px-3 py-2 rounded-full font-medium transition ${
-                          inPlan ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-red-100 text-red-600 hover:bg-red-200"
+                          isPublicView
+                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            : inPlan
+                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            : "bg-red-100 text-red-600 hover:bg-red-200"
                         }`}
                       >
-                        {inPlan ? "Added" : "Add"}
+                        {isPublicView ? "Login to add" : inPlan ? "Added" : "Add"}
                       </button>
                     </div>
 
@@ -764,7 +901,11 @@ export default function App() {
                           e.stopPropagation();
                           removeSpot(spot);
                         }}
-                        className="text-sm text-gray-400 hover:text-red-500"
+                        disabled={isPublicView}
+                        title={isPublicView ? "Login required" : ""}
+                        className={`text-sm ${
+                          isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
+                        }`}
                       >
                         Delete
                       </button>
