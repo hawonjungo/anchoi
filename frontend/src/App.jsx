@@ -118,42 +118,83 @@ export default function App() {
 
   // ---------- Load shared plan (read-only) ----------
   const loadSharedPlan = async (planId) => {
-    if (!API_BASE || !planId) return;
+  if (!API_BASE || !planId) return;
 
-    setIsLoadingSharedPlan(true);
-    try {
-      // Requires backend route: GET /public/plans/{planId}
-      const res = await fetch(`${API_BASE}/public/plans/${encodeURIComponent(planId)}`);
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`GET public plan failed: ${res.status} ${t}`);
-      }
-
-      const data = await res.json();
-      setPlanName(data?.name ?? "Shared plan");
-
-      const items = Array.isArray(data?.items) ? data.items : [];
-      const normalized = items
-        .map((x) => ({
-          spotId: x.spotId,
-          visited: !!x.visited,
-          order: typeof x.order === "number" ? x.order : 0,
-        }))
-        .filter((x) => typeof x.spotId === "string" && x.spotId.length > 0)
-        .sort((a, b) => a.order - b.order)
-        .map(({ spotId, visited }) => ({ spotId, visited }));
-
-      setPlanItems(normalized);
-      setSavedPlan(null);
-      setFollowMode(false);
-      setSelectedSpot(null);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to load shared plan. Check console.");
-    } finally {
-      setIsLoadingSharedPlan(false);
+  setIsLoadingSharedPlan(true);
+  try {
+    const res = await fetch(`${API_BASE}/public/plans/${encodeURIComponent(planId)}`);
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`GET public plan failed: ${res.status} ${t}`);
     }
-  };
+
+    const data = await res.json();
+    console.log("public plan payload:", data);
+
+    setPlanName(data?.name ?? data?.planName ?? "Shared plan");
+
+    // ✅ Optional: backend can return spot snapshot for public view
+    if (Array.isArray(data?.spots)) {
+      const safeSpots = data.spots
+        .map((x) => ({
+          ...x,
+          lat: typeof x?.lat === "string" ? parseFloat(x.lat) : x?.lat,
+          lng: typeof x?.lng === "string" ? parseFloat(x.lng) : x?.lng,
+        }))
+        .filter(
+          (x) =>
+            x &&
+            typeof x.id === "string" &&
+            typeof x.spotName === "string" &&
+            x.spotName.trim().length > 0 &&
+            typeof x.address === "string" &&
+            x.address.trim().length > 0 &&
+            Number.isFinite(x.lat) &&
+            Number.isFinite(x.lng)
+        );
+
+      setSpots(safeSpots);
+    }
+
+    // ✅ Support multiple backend shapes for items
+    const itemsCandidate =
+      (Array.isArray(data?.items) && data.items) ||
+      (Array.isArray(data?.planItems) && data.planItems) ||
+      (Array.isArray(data?.plan?.items) && data.plan.items) ||
+      (Array.isArray(data?.Item?.items) && data.Item.items) ||
+      [];
+
+    // ✅ Normalize keys
+    const normalized = itemsCandidate
+      .map((x, idx) => {
+        const spotId = x?.spotId ?? x?.spotID ?? x?.id ?? x?.spot_id;
+        const visited = !!(x?.visited ?? x?.isVisited);
+        const order =
+          typeof x?.order === "number"
+            ? x.order
+            : typeof x?.order === "string"
+            ? parseInt(x.order, 10)
+            : idx;
+
+        return { spotId, visited, order };
+      })
+      .filter((x) => typeof x.spotId === "string" && x.spotId.length > 0)
+      .sort((a, b) => a.order - b.order)
+      .map(({ spotId, visited }) => ({ spotId, visited }));
+
+    setPlanItems(normalized);
+
+    setSavedPlan(null);
+    setFollowMode(false);
+    setSelectedSpot(null);
+  } catch (err) {
+    console.error(err);
+    alert("Failed to load shared plan. Check console.");
+  } finally {
+    setIsLoadingSharedPlan(false);
+  }
+};
+
 
   useEffect(() => {
     if (sharedPlanId) loadSharedPlan(sharedPlanId);
