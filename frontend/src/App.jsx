@@ -20,6 +20,11 @@ export default function App() {
   const [planItems, setPlanItems] = useState([]);
   const [followMode, setFollowMode] = useState(false);
 
+  // -------- Phase 2.5: Persisted plan (Step 1) --------
+  const [planName, setPlanName] = useState("");
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [savedPlan, setSavedPlan] = useState(null); // { planId, shareUrl }
+
   // -------- UX state --------
   const [isLoadingSpots, setIsLoadingSpots] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -80,7 +85,12 @@ export default function App() {
   };
 
   const focusSpot = (spot) => {
-    setSelectedSpot(spot);
+    // Guard against bad coordinates (prevents Google Maps 'lat is not a number')
+    if (!spot) return;
+    const lat = typeof spot.lat === "string" ? parseFloat(spot.lat) : spot.lat;
+    const lng = typeof spot.lng === "string" ? parseFloat(spot.lng) : spot.lng;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    setSelectedSpot({ ...spot, lat, lng });
   };
 
   const focusNextUnvisited = () => {
@@ -101,7 +111,29 @@ export default function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = await res.json();
-        const spotsArray = Array.isArray(data) ? data : data.items ?? [];
+        const raw = Array.isArray(data) ? data : data.items ?? [];
+
+        // IMPORTANT: Your /spots endpoint may return non-spot items (e.g., PLAN rows).
+        // Also DynamoDB sometimes stores numbers as strings depending on your writer.
+        // So we sanitize + filter here to avoid empty cards and map errors.
+        const spotsArray = raw
+          .map((x) => {
+            const lat = typeof x?.lat === "string" ? parseFloat(x.lat) : x?.lat;
+            const lng = typeof x?.lng === "string" ? parseFloat(x.lng) : x?.lng;
+            return { ...x, lat, lng };
+          })
+          .filter(
+            (x) =>
+              x &&
+              typeof x.id === "string" &&
+              typeof x.spotName === "string" &&
+              x.spotName.trim().length > 0 &&
+              typeof x.address === "string" &&
+              x.address.trim().length > 0 &&
+              Number.isFinite(x.lat) &&
+              Number.isFinite(x.lng)
+          );
+
         setSpots(spotsArray);
       } catch (err) {
         console.error("Load spots failed:", err);
@@ -311,6 +343,56 @@ export default function App() {
 
   const unvisitedCount = planItems.filter((x) => !x.visited).length;
 
+  // ---------- Save plan (Step 1) ----------
+  const savePlan = async () => {
+    if (!API_BASE) {
+      alert("Missing API base URL.");
+      return;
+    }
+    if (!planItems.length) {
+      alert("Your plan is empty. Add some spots first.");
+      return;
+    }
+
+    const name = planName.trim() || `My Plan (${new Date().toLocaleDateString()})`;
+
+    const payload = {
+      name,
+      items: planItems.map((x, idx) => ({
+        spotId: x.spotId,
+        visited: !!x.visited,
+        order: idx,
+      })),
+      isPublic: true,
+    };
+
+    setIsSavingPlan(true);
+    try {
+      const res = await fetch(`${API_BASE}/plans`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`POST /plans failed: ${res.status} ${errText}`);
+      }
+
+      const data = await res.json();
+      setSavedPlan(data);
+
+      if (data?.shareUrl && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(data.shareUrl);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save plan. Check console.");
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* HEADER */}
@@ -395,14 +477,16 @@ export default function App() {
               <div className="px-5 pb-5">
                 <div className="rounded-2xl overflow-hidden shadow-sm border">
                   <GoogleMap
-                    mapContainerStyle={{ width: "100%", height: "680px" }}
+                    mapContainerStyle={{ width: "100%", height: "320px" }}
                     center={defaultCenter}
                     zoom={12}
                     onLoad={(map) => {
                       mapRef.current = map;
                     }}
                   >
-                    {spots.map((spot) => (
+                    {spots
+                      .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng))
+                      .map((spot) => (
                       <Marker
                         key={spot.id}
                         position={{ lat: spot.lat, lng: spot.lng }}
@@ -410,7 +494,7 @@ export default function App() {
                       />
                     ))}
 
-                    {selectedSpot && (
+                    {selectedSpot && Number.isFinite(selectedSpot.lat) && Number.isFinite(selectedSpot.lng) && (
                       <InfoWindow
                         position={{ lat: selectedSpot.lat, lng: selectedSpot.lng }}
                         onCloseClick={() => setSelectedSpot(null)}
@@ -542,6 +626,54 @@ export default function App() {
             </div>
           )}
 
+          {/* Save plan bar */}
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-end lg:justify-between border-t pt-4">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-gray-600">Plan name</label>
+              <input
+                value={planName}
+                onChange={(e) => setPlanName(e.target.value)}
+                placeholder="e.g. HCM Food Day 1"
+                className="mt-1 w-full border rounded-xl p-3 focus:ring-2 focus:ring-red-400 outline-none"
+              />
+              {savedPlan?.shareUrl && (
+                <div className="mt-2 text-xs text-gray-600">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">Share link:</span>
+                    <a className="text-red-500 underline break-all" href={savedPlan.shareUrl} target="_blank" rel="noreferrer">
+                      {savedPlan.shareUrl}
+                    </a>
+                    <button
+                      className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(savedPlan.shareUrl);
+                          alert("Copied!");
+                        } catch {
+                          alert("Copy failed. You can copy the link manually.");
+                        }
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={savePlan}
+              disabled={isSavingPlan || planItems.length === 0}
+              className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${
+                isSavingPlan || planItems.length === 0
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : "bg-red-500 text-white hover:bg-red-600"
+              }`}
+            >
+              {isSavingPlan ? "Saving plan…" : "Save plan"}
+            </button>
+          </div>
+
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={focusNextUnvisited}
@@ -557,6 +689,9 @@ export default function App() {
               onClick={() => {
                 setPlanItems([]);
                 setFollowMode(false);
+                setSelectedSpot(null);
+                setSavedPlan(null);
+                setPlanName("");
               }}
               disabled={planItems.length === 0}
               className={`w-full py-3 rounded-xl font-semibold transition ${
