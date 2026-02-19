@@ -11,9 +11,7 @@ export default function App() {
   // https://anchoi.relifes.net/?plan=<planId>
   const [sharedPlanId, setSharedPlanId] = useState(null);
   const [isLoadingSharedPlan, setIsLoadingSharedPlan] = useState(false);
-  const isPublicView = !!sharedPlanId; // viewing a shared link
-  const canWriteServer = !isPublicView; // until we implement login/auth
-  const canEditPlan = true; // public users can interact locally (not saved)
+  const isPublicView = !!sharedPlanId; // shared link => read-only (until we implement login)
 
   // -------- Form state --------
   const [videoUrl, setVideoUrl] = useState("");
@@ -110,11 +108,45 @@ export default function App() {
   };
 
   // ---------- Read shared plan id from URL ----------
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const planId = sp.get("plan");
-    setSharedPlanId(planId);
-  }, []);
+// Supports:
+// 1) https://anchoi.relifes.net/?plan=<id>
+// 2) https://anchoi.relifes.net/#/?plan=<id>   (hash routing)
+// 3) https://anchoi.relifes.net/share/<id>     (optional)
+const getPlanIdFromUrl = () => {
+  const url = new URL(window.location.href);
+
+  // Normal query string
+  const q1 = url.searchParams.get("plan");
+  if (q1) return q1;
+
+  // Hash query (GitHub Pages + hash routing)
+  // Examples:
+  //   #/?plan=abc
+  //   #/share/abc
+  const hash = (url.hash || "").replace(/^#/, "");
+  if (hash.includes("?")) {
+    const hashQuery = hash.split("?")[1] ?? "";
+    const hp = new URLSearchParams(hashQuery);
+    const q2 = hp.get("plan");
+    if (q2) return q2;
+  }
+
+  // Hash path like #/share/<id>
+  const hashPath = hash.split("?")[0] ?? "";
+  const mHash = hashPath.match(/\/share\/([^/]+)/i);
+  if (mHash?.[1]) return decodeURIComponent(mHash[1]);
+
+  // Path like /share/<id>
+  const mPath = url.pathname.match(/\/share\/([^/]+)/i);
+  if (mPath?.[1]) return decodeURIComponent(mPath[1]);
+
+  return null;
+};
+
+useEffect(() => {
+  const planId = getPlanIdFromUrl();
+  setSharedPlanId(planId);
+}, []);
 
   // ---------- Load shared plan (read-only) ----------
   const loadSharedPlan = async (planId) => {
@@ -122,6 +154,7 @@ export default function App() {
 
   setIsLoadingSharedPlan(true);
   try {
+    // Requires backend route: GET /public/plans/{planId}
     const res = await fetch(`${API_BASE}/public/plans/${encodeURIComponent(planId)}`);
     if (!res.ok) {
       const t = await res.text();
@@ -129,18 +162,17 @@ export default function App() {
     }
 
     const data = await res.json();
-    console.log("public plan payload:", data);
+    setPlanName(data?.name ?? "Shared plan");
 
-    setPlanName(data?.name ?? data?.planName ?? "Shared plan");
-
-    // ✅ Optional: backend can return spot snapshot for public view
+    // Optional (recommended): backend can return spots snapshot for public view
+    // { spots: [{id, spotName, address, lat, lng, videoUrl}] }
     if (Array.isArray(data?.spots)) {
       const safeSpots = data.spots
-        .map((x) => ({
-          ...x,
-          lat: typeof x?.lat === "string" ? parseFloat(x.lat) : x?.lat,
-          lng: typeof x?.lng === "string" ? parseFloat(x.lng) : x?.lng,
-        }))
+        .map((x) => {
+          const lat = typeof x?.lat === "string" ? parseFloat(x.lat) : x?.lat;
+          const lng = typeof x?.lng === "string" ? parseFloat(x.lng) : x?.lng;
+          return { ...x, lat, lng };
+        })
         .filter(
           (x) =>
             x &&
@@ -152,38 +184,21 @@ export default function App() {
             Number.isFinite(x.lat) &&
             Number.isFinite(x.lng)
         );
-
       setSpots(safeSpots);
     }
 
-    // ✅ Support multiple backend shapes for items
-    const itemsCandidate =
-      (Array.isArray(data?.items) && data.items) ||
-      (Array.isArray(data?.planItems) && data.planItems) ||
-      (Array.isArray(data?.plan?.items) && data.plan.items) ||
-      (Array.isArray(data?.Item?.items) && data.Item.items) ||
-      [];
-
-    // ✅ Normalize keys
-    const normalized = itemsCandidate
-      .map((x, idx) => {
-        const spotId = x?.spotId ?? x?.spotID ?? x?.id ?? x?.spot_id;
-        const visited = !!(x?.visited ?? x?.isVisited);
-        const order =
-          typeof x?.order === "number"
-            ? x.order
-            : typeof x?.order === "string"
-            ? parseInt(x.order, 10)
-            : idx;
-
-        return { spotId, visited, order };
-      })
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const normalized = items
+      .map((x) => ({
+        spotId: x.spotId,
+        visited: !!x.visited,
+        order: typeof x.order === "number" ? x.order : 0,
+      }))
       .filter((x) => typeof x.spotId === "string" && x.spotId.length > 0)
       .sort((a, b) => a.order - b.order)
       .map(({ spotId, visited }) => ({ spotId, visited }));
 
     setPlanItems(normalized);
-
     setSavedPlan(null);
     setFollowMode(false);
     setSelectedSpot(null);
@@ -194,7 +209,6 @@ export default function App() {
     setIsLoadingSharedPlan(false);
   }
 };
-
 
   useEffect(() => {
     if (sharedPlanId) loadSharedPlan(sharedPlanId);
@@ -264,7 +278,7 @@ export default function App() {
 
   // ---------- Plan actions (disabled in public view) ----------
   const addToPlan = (spot) => {
-    if (!canEditPlan) return;
+    if (isPublicView) return;
     setPlanItems((prev) => {
       if (prev.some((x) => x.spotId === spot.id)) return prev;
       return [...prev, { spotId: spot.id, visited: false }];
@@ -272,20 +286,20 @@ export default function App() {
   };
 
   const toggleVisited = (spotId) => {
-    if (!canEditPlan) return;
+    // Public view: allow local-only changes (not saved)
     setPlanItems((prev) =>
       prev.map((x) => (x.spotId === spotId ? { ...x, visited: !x.visited } : x))
     );
   };
 
   const removeFromPlan = (spotId) => {
-    if (!canEditPlan) return;
+    // Public view: allow local-only changes (not saved)
     setPlanItems((prev) => prev.filter((x) => x.spotId !== spotId));
     if (selectedSpot?.id === spotId) setSelectedSpot(null);
   };
 
   const autoOrderPlan = async () => {
-    if (!canEditPlan) return;
+    // Public view: allow local-only optimization (not saved)
 
     const getStart = () =>
       new Promise((resolve) => {
@@ -339,7 +353,7 @@ export default function App() {
   // ---------- Create spot (optimistic) (disabled in public view) ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!canWriteServer) return;
+    if (isPublicView) return;
     if (isSaving) return;
 
     const name = spotName.trim();
@@ -422,7 +436,7 @@ export default function App() {
   };
 
   const removeSpot = async (spot) => {
-    if (!canWriteServer) return;
+    if (isPublicView) return;
 
     if (spot._optimistic) {
       setSpots((prev) => prev.filter((s) => s.id !== spot.id));
@@ -451,7 +465,7 @@ export default function App() {
 
   // ---------- Save plan (Step 1) (disabled in public view) ----------
   const savePlan = async () => {
-    if (!canWriteServer) return;
+    if (isPublicView) return;
 
     if (!API_BASE) {
       alert("Missing API base URL.");
@@ -488,10 +502,24 @@ export default function App() {
       }
 
       const data = await res.json();
-      setSavedPlan(data);
 
-      if (data?.shareUrl && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(data.shareUrl);
+      // Some backends return only { planId } or only { shareUrl }.
+      // Build a safe shareUrl fallback so the UI always shows something.
+      const planId = data?.planId;
+      const shareUrl =
+        data?.shareUrl ||
+        (planId ? `${window.location.origin}/?plan=${encodeURIComponent(planId)}` : null);
+
+      const saved = { ...data, planId, shareUrl };
+      setSavedPlan(saved);
+
+      // Copy to clipboard if possible (non-blocking)
+      if (saved?.shareUrl && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(saved.shareUrl);
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.error(err);
@@ -552,8 +580,9 @@ export default function App() {
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                    }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
@@ -564,8 +593,9 @@ export default function App() {
                   value={spotName}
                   onChange={(e) => setSpotName(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                    }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
@@ -576,8 +606,9 @@ export default function App() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   disabled={isPublicView}
-                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                    }`}
+                  className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                    isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                  }`}
                 />
               </div>
 
@@ -585,10 +616,11 @@ export default function App() {
                 type="submit"
                 disabled={isPublicView || isSaving}
                 title={isPublicView ? "Login required" : ""}
-                className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || isSaving
-                  ? "bg-gray-300 text-gray-700 cursor-not-allowed"
-                  : "bg-red-500 text-white hover:bg-red-600"
-                  }`}
+                className={`w-full py-3 rounded-xl font-semibold transition ${
+                  isPublicView || isSaving
+                    ? "bg-gray-300 text-gray-700 cursor-not-allowed"
+                    : "bg-red-500 text-white hover:bg-red-600"
+                }`}
               >
                 {isPublicView ? "Login to add spots" : isSaving ? "Saving…" : "Save spot"}
               </button>
@@ -672,7 +704,7 @@ export default function App() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Today’s plan</h2>
               <p className="text-sm text-gray-500 mt-1">
-                {isPublicView ? "Read-only for public links." : "Add spots, optimize, then tick them off as you go."}
+                {isPublicView ? "Public viewers can optimize, follow, mark done, and remove locally (changes are not saved)." : "Add spots, optimize, then tick them off as you go."}
               </p>
             </div>
 
@@ -680,22 +712,18 @@ export default function App() {
               <button
                 onClick={autoOrderPlan}
                 className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
-                disabled={!canEditPlan || planItems.length < 2}
-                title={isPublicView ? "Login required" : planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
+                disabled={planItems.length < 2}
+                title={planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
               >
                 Optimize
               </button>
 
               <button
                 onClick={() => setFollowMode((v) => !v)}
-                disabled={!canEditPlan}
-                title={isPublicView ? "Login required" : ""}
-                className={`text-xs px-3 py-2 rounded-xl transition ${isPublicView
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : followMode
-                    ? "bg-red-500 text-white"
-                    : "border bg-gray-50 hover:bg-gray-100"
-                  }`}
+                title={isPublicView ? "Public view: changes are local only" : ""}
+                className={`text-xs px-3 py-2 rounded-xl transition ${
+                  followMode ? "bg-red-500 text-white" : "border bg-gray-50 hover:bg-gray-100"
+                }`}
               >
                 {followMode ? "Following" : "Follow"}
               </button>
@@ -712,14 +740,36 @@ export default function App() {
             <div className="space-y-3">
               {planItems.map((item, index) => {
                 const spot = getSpotById(item.spotId);
-                if (!spot) return null;
+
+                // If the shared plan loads but we don't have spot details, show a helpful placeholder
+                if (!spot) {
+                  return (
+                    <div
+                      key={item.spotId}
+                      className={`p-4 rounded-2xl border transition ${
+                        item.visited
+                          ? "bg-green-50 border-green-200"
+                          : "bg-gray-50 border-gray-200"
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-gray-900">
+                        {index + 1}. Spot details not loaded
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1 break-all">spotId: {item.spotId}</p>
+                      <p className="text-xs text-gray-400 mt-2">
+                        Public view needs the backend to return a spot snapshot in <b>data.spots</b>.
+                      </p>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
                     key={item.spotId}
                     onClick={() => focusSpot(spot)}
-                    className={`p-4 rounded-2xl border transition cursor-pointer ${item.visited ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200 hover:bg-gray-100"
-                      }`}
+                    className={`p-4 rounded-2xl border transition cursor-pointer ${
+                      item.visited ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -747,34 +797,28 @@ export default function App() {
 
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleVisited(item.spotId);
-                          }}
-                          disabled={!canEditPlan}
-                          title={isPublicView ? "Login required" : ""}
-                          className={`text-xs px-3 py-2 rounded-xl ${isPublicView
-                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                            : item.visited
-                              ? "bg-green-600 text-white"
-                              : "bg-white border hover:bg-gray-50"
-                            }`}
-                        >
-                          {item.visited ? "✓" : "Done"}
-                        </button>
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleVisited(item.spotId);
+                        }}
+                        title={isPublicView ? "Public view: changes are local only" : ""}
+                        className={`text-xs px-3 py-2 rounded-xl ${
+                          item.visited ? "bg-green-600 text-white" : "bg-white border hover:bg-gray-50"
+                        }`}
+                      >
+                        {item.visited ? "✓" : "Done"}
+                      </button>
 
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFromPlan(item.spotId);
-                          }}
-                          disabled={!canEditPlan}
-                          title={isPublicView ? "Login required" : ""}
-                          className={`text-xs ${isPublicView ? "text-gray-400 cursor-not-allowed" : "text-red-500 hover:text-red-600"
-                            }`}
-                        >
-                          Remove
-                        </button>
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromPlan(item.spotId);
+                        }}
+                        title={isPublicView ? "Public view: changes are local only" : ""}
+                        className="text-xs text-red-500 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
                       </div>
                     </div>
                   </div>
@@ -792,8 +836,9 @@ export default function App() {
                 onChange={(e) => setPlanName(e.target.value)}
                 placeholder="e.g. HCM Food Day 1"
                 disabled={isPublicView}
-                className={`mt-1 w-full border rounded-xl p-3 outline-none ${isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
-                  }`}
+                className={`mt-1 w-full border rounded-xl p-3 outline-none ${
+                  isPublicView ? "bg-gray-100 text-gray-500" : "focus:ring-2 focus:ring-red-400"
+                }`}
               />
               {savedPlan?.shareUrl && (
                 <div className="mt-2 text-xs text-gray-600">
@@ -822,14 +867,15 @@ export default function App() {
 
             <button
               onClick={savePlan}
-              disabled={!canWriteServer || isSavingPlan || planItems.length === 0}
+              disabled={isPublicView || isSavingPlan || planItems.length === 0}
               title={isPublicView ? "Login required" : ""}
-              className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${isPublicView || isSavingPlan || planItems.length === 0
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-red-500 text-white hover:bg-red-600"
-                }`}
+              className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${
+                isPublicView || isSavingPlan || planItems.length === 0
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : "bg-red-500 text-white hover:bg-red-600"
+              }`}
             >
-              {isPublicView ? "Saving disabled on public link" : isSavingPlan ? "Saving plan…" : "Save plan"}
+              {isPublicView ? "Login to save" : isSavingPlan ? "Saving plan…" : "Save plan"}
             </button>
           </div>
 
@@ -837,29 +883,35 @@ export default function App() {
             <button
               onClick={focusNextUnvisited}
               disabled={unvisitedCount === 0}
-              className={`w-full py-3 rounded-xl font-semibold transition ${unvisitedCount === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:bg-black"
-                }`}
+              className={`w-full py-3 rounded-xl font-semibold transition ${
+                unvisitedCount === 0 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:bg-black"
+              }`}
             >
               Next unvisited
             </button>
 
             <button
               onClick={() => {
-                if (isPublicView) return;
+                if (isPublicView) {
+                  // Public view: reset back to original shared plan
+                  if (sharedPlanId) loadSharedPlan(sharedPlanId);
+                  return;
+                }
                 setPlanItems([]);
                 setFollowMode(false);
                 setSelectedSpot(null);
                 setSavedPlan(null);
                 setPlanName("");
               }}
-              disabled={isPublicView || planItems.length === 0}
-              title={isPublicView ? "Login required" : ""}
-              className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || planItems.length === 0
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "border bg-white hover:bg-gray-50"
-                }`}
+              disabled={!isPublicView && planItems.length === 0}
+              title={isPublicView ? "Reset back to the shared plan" : ""}
+              className={`w-full py-3 rounded-xl font-semibold transition ${
+                isPublicView || planItems.length === 0
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : "border bg-white hover:bg-gray-50"
+              }`}
             >
-              {isPublicView ? "Login to edit" : "Clear plan"}
+              {isPublicView ? "Reset plan" : "Clear plan"}
             </button>
           </div>
         </div>
@@ -887,8 +939,9 @@ export default function App() {
                   <div
                     key={spot.id}
                     onClick={() => focusSpot(spot)}
-                    className={`bg-white rounded-2xl shadow-md p-5 space-y-3 transition hover:shadow-lg cursor-pointer ${spot._optimistic ? "border border-yellow-200" : ""
-                      }`}
+                    className={`bg-white rounded-2xl shadow-md p-5 space-y-3 transition hover:shadow-lg cursor-pointer ${
+                      spot._optimistic ? "border border-yellow-200" : ""
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -903,14 +956,15 @@ export default function App() {
                         }}
                         disabled={isPublicView || inPlan}
                         title={isPublicView ? "Login required" : ""}
-                        className={`text-xs px-3 py-2 rounded-full font-medium transition ${isPublicView
-                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                          : inPlan
+                        className={`text-xs px-3 py-2 rounded-full font-medium transition ${
+                          isPublicView
+                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            : inPlan
                             ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                             : "bg-red-100 text-red-600 hover:bg-red-200"
-                          }`}
+                        }`}
                       >
-                        {isPublicView ? "Login to add" : inPlan ? "Added" : "Add"}
+                        Add
                       </button>
                     </div>
 
@@ -932,8 +986,9 @@ export default function App() {
                         }}
                         disabled={isPublicView}
                         title={isPublicView ? "Login required" : ""}
-                        className={`text-sm ${isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
-                          }`}
+                        className={`text-sm ${
+                          isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
+                        }`}
                       >
                         Delete
                       </button>
