@@ -6,20 +6,28 @@ import { apiFetch } from "./lib/apiClient";
 export default function App() {
   const env = import.meta.env;
   const API_BASE = env.VITE_API_BASE_URL;
+  const cleanEnv = (v) => {
+    if (typeof v !== "string") return "";
+    return v.trim().replace(/^['"]|['"]$/g, "");
+  };
 
   // ==================================================
   // AUTH (Cognito Hosted UI - Authorization Code + PKCE)
   // ==================================================
-  const COGNITO_DOMAIN = env.VITE_COGNITO_DOMAIN;
-  const COGNITO_CLIENT_ID = env.VITE_COGNITO_CLIENT_ID;
-  const COGNITO_REDIRECT_URI = env.VITE_COGNITO_REDIRECT_URI;
+  const COGNITO_DOMAIN = cleanEnv(env.VITE_COGNITO_DOMAIN)
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+  const COGNITO_CLIENT_ID = cleanEnv(env.VITE_COGNITO_CLIENT_ID);
+  const COGNITO_REDIRECT_URI =
+    cleanEnv(env.VITE_COGNITO_REDIRECT_URI) || window.location.origin + "/auth/callback";
   const COGNITO_LOGOUT_REDIRECT_URI =
-    env.VITE_COGNITO_LOGOUT_REDIRECT_URI || window.location.origin + "/";
+    cleanEnv(env.VITE_COGNITO_LOGOUT_REDIRECT_URI) || window.location.origin + "/";
 
   const AUTH_STORAGE_KEY = "anchoi_auth";
+  const SAVED_PLANS_CACHE_KEY = "anchoi_saved_plans_cache";
   const [authUser, setAuthUser] = useState(null); // { name, picture, email }
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const didInitRef = useRef(false); // ✅ guard: tránh init/exchange chạy 2 lần (React 18 StrictMode dev)
+  const didInitRef = useRef(false); // Guard against double init/exchange in React 18 StrictMode (dev)
 
   const saveAuthTokens = (tokens) => {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
@@ -38,11 +46,21 @@ export default function App() {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
-  const getAccessToken = () => {
-    const t = readAuthTokens();
-    if (!t || !t.access_token) return null;
-    if (t.expires_at && Date.now() > t.expires_at) return null;
-    return t.access_token;
+  const readSavedPlansCache = () => {
+    try {
+      const raw = localStorage.getItem(SAVED_PLANS_CACHE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const writeSavedPlansCache = (plans) => {
+    try {
+      localStorage.setItem(SAVED_PLANS_CACHE_KEY, JSON.stringify(plans || []));
+    } catch {
+      // ignore cache write errors
+    }
   };
 
   // IMPORTANT: API Gateway JWT authorizer (Cognito) commonly validates the ID token (aud claim).
@@ -76,7 +94,7 @@ export default function App() {
     return crypto.subtle.digest("SHA-256", enc);
   };
 
-  // ✅ Fix normalize scopes: không được replaceAll("", " ")
+  // Normalize scopes from env into whitespace-delimited format.
   const normalizeScopes = (raw) => {
     return (raw || "")
       .replace(/[,+]/g, " ")
@@ -87,9 +105,12 @@ export default function App() {
 
   const startLogin = async () => {
     setIsAuthLoading(true);
-    if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID || !COGNITO_REDIRECT_URI) {
+    if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
+      const missing = [];
+      if (!COGNITO_DOMAIN) missing.push("VITE_COGNITO_DOMAIN");
+      if (!COGNITO_CLIENT_ID) missing.push("VITE_COGNITO_CLIENT_ID");
       alert(
-        "Thiếu env Cognito. Cần: VITE_COGNITO_DOMAIN / VITE_COGNITO_CLIENT_ID / VITE_COGNITO_REDIRECT_URI"
+        "Missing Cognito env vars: " + missing.join(" / ") + ". Check .env and restart dev server."
       );
       setIsAuthLoading(false);
       return;
@@ -99,7 +120,7 @@ export default function App() {
     const challenge = base64url(await sha256(verifier));
     sessionStorage.setItem("pkce_verifier", verifier);
 
-    // ✅ Default thêm profile để lấy picture từ Google/Facebook
+    // Include profile scope by default so user pictures are available.
     const scopes = normalizeScopes(env.VITE_COGNITO_SCOPES || "openid email profile");
 
     const url = new URL("https://" + COGNITO_DOMAIN + "/oauth2/authorize");
@@ -110,13 +131,13 @@ export default function App() {
     url.searchParams.set("code_challenge_method", "S256");
     url.searchParams.set("code_challenge", challenge);
 
-    // Không set identity_provider => Hosted UI hiện nút Google/Facebook
+    // Do not force identity_provider so Hosted UI can show all login providers.
     window.location.assign(url.toString());
   };
 
   const exchangeCodeForTokens = async (code) => {
     const verifier = sessionStorage.getItem("pkce_verifier");
-    if (!verifier) throw new Error("Thiếu PKCE verifier. Hãy Login lại.");
+    if (!verifier) throw new Error("Missing PKCE verifier. Please log in again.");
 
     const tokenUrl = "https://" + COGNITO_DOMAIN + "/oauth2/token";
 
@@ -187,7 +208,7 @@ export default function App() {
 
   // Callback: ?code=...
   useEffect(() => {
-    // ✅ Guard: tránh init chạy 2 lần -> exchange code 2 lần -> invalid_grant
+    // Guard against duplicate init that can exchange the same code twice.
     if (didInitRef.current) return;
     didInitRef.current = true;
 
@@ -196,7 +217,7 @@ export default function App() {
     const err = url.searchParams.get("error");
 
     const init = async () => {
-      if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID || !COGNITO_REDIRECT_URI) return;
+      if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) return;
 
       setIsAuthLoading(true);
       try {
@@ -252,7 +273,9 @@ export default function App() {
       headers.set("Content-Type", "application/json");
     }
 
-    return apiFetch(path, { ...init, headers });
+    // apiFetch() defaults to Amplify auth injection; disable it because we already
+    // attach Cognito Hosted UI token above.
+    return apiFetch(path, { ...init, headers }, { auth: false });
   };
 
   // ==================================================
@@ -261,7 +284,7 @@ export default function App() {
 
   // -------- Public share (read-only) --------
   const [sharedPlanId, setSharedPlanId] = useState(null);
-  const [isLoadingSharedPlan, setIsLoadingSharedPlan] = useState(false);
+  const [, setIsLoadingSharedPlan] = useState(false);
   const isPublicView = !!sharedPlanId;
 
   // -------- Form state --------
@@ -272,15 +295,19 @@ export default function App() {
   // -------- Data state --------
   const [spots, setSpots] = useState([]);
   const [selectedSpot, setSelectedSpot] = useState(null);
+  const [sharedSpotDetailsById, setSharedSpotDetailsById] = useState({});
 
   // -------- Plan state --------
   const [planItems, setPlanItems] = useState([]);
-  const [followMode, setFollowMode] = useState(false);
+  const [followMode, setFollowMode] = useState(true);
 
   // -------- Persisted plan --------
   const [planName, setPlanName] = useState("");
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [savedPlan, setSavedPlan] = useState(null);
+  const [savedPlans, setSavedPlans] = useState([]);
+  const [isLoadingSavedPlans, setIsLoadingSavedPlans] = useState(false);
+  const [deletingPlanId, setDeletingPlanId] = useState(null);
 
   // -------- UX state --------
   const [isLoadingSpots, setIsLoadingSpots] = useState(false);
@@ -404,25 +431,74 @@ export default function App() {
       const data = await res.json();
       setPlanName((data && data.name) || "Shared plan");
 
-      if (Array.isArray(data && data.spots)) {
-        const safeSpots = data.spots
-          .map((x) => {
-            const lat = typeof x.lat === "string" ? parseFloat(x.lat) : x.lat;
-            const lng = typeof x.lng === "string" ? parseFloat(x.lng) : x.lng;
-            return { ...x, lat, lng };
-          })
-          .filter(
-            (x) =>
-              x &&
-              typeof x.id === "string" &&
-              typeof x.spotName === "string" &&
-              x.spotName.trim().length > 0 &&
-              typeof x.address === "string" &&
-              x.address.trim().length > 0 &&
-              Number.isFinite(x.lat) &&
-              Number.isFinite(x.lng)
-          );
-        setSpots(safeSpots);
+      const getSpotId = (x) => {
+        if (typeof x?.id === "string" && x.id) return x.id;
+        if (typeof x?.spotId === "string" && x.spotId) return x.spotId;
+        if (typeof x?.spotID === "string" && x.spotID) return x.spotID;
+        if (typeof x?.sk === "string" && x.sk.startsWith("SPOT#")) return x.sk.slice(5);
+        return null;
+      };
+
+      const toNumber = (v) => {
+        if (typeof v === "number") return v;
+        if (typeof v === "string") {
+          const n = parseFloat(v);
+          return Number.isFinite(n) ? n : NaN;
+        }
+        return NaN;
+      };
+
+      const normalizeSpot = (x) => {
+        const id = getSpotId(x);
+        const lat = toNumber(x?.lat ?? x?.latitude ?? x?.location?.lat);
+        const lng = toNumber(x?.lng ?? x?.longitude ?? x?.location?.lng);
+        return {
+          id,
+          spotName: x?.spotName || x?.name || x?.title || "",
+          address: x?.address || x?.formattedAddress || "",
+          videoUrl: x?.videoUrl || x?.videoURL || x?.url || "",
+          lat,
+          lng,
+        };
+      };
+
+      const isValidSpotDetail = (x) =>
+        x &&
+        typeof x.id === "string" &&
+        x.id.trim().length > 0 &&
+        typeof x.spotName === "string" &&
+        x.spotName.trim().length > 0 &&
+        typeof x.address === "string" &&
+        x.address.trim().length > 0;
+
+      const isValidSpotForMap = (x) =>
+        isValidSpotDetail(x) && Number.isFinite(x.lat) && Number.isFinite(x.lng);
+
+      const rawSpots = Array.isArray(data && data.spots) ? data.spots : [];
+      const rawItems = Array.isArray(data && data.items) ? data.items : [];
+
+      // Support both payload shapes:
+      // 1) data.spots contains snapshots
+      // 2) data.items already include spot snapshot fields
+      const derivedFromItems = rawItems.filter(
+        (x) => x && (x.spotName || x.name || x.address || x.formattedAddress)
+      );
+
+      const merged = [...rawSpots, ...derivedFromItems]
+        .map(normalizeSpot)
+        .filter(isValidSpotDetail);
+
+      if (merged.length) {
+        const byId = new Map();
+        for (const s of merged) byId.set(s.id, s);
+        const allDetails = Array.from(byId.values());
+        const detailsMap = {};
+        for (const s of allDetails) detailsMap[s.id] = s;
+        setSharedSpotDetailsById(detailsMap);
+        setSpots(allDetails.filter(isValidSpotForMap));
+      } else {
+        setSharedSpotDetailsById({});
+        setSpots([]);
       }
 
       const items = (data && data.items) || [];
@@ -438,7 +514,7 @@ export default function App() {
 
       setPlanItems(normalized);
       setSavedPlan(null);
-      setFollowMode(false);
+      setFollowMode(true);
       setSelectedSpot(null);
     } catch (err) {
       console.error(err);
@@ -452,6 +528,10 @@ export default function App() {
     if (sharedPlanId) loadSharedPlan(sharedPlanId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedPlanId, API_BASE]);
+
+  useEffect(() => {
+    if (!isPublicView) setSharedSpotDetailsById({});
+  }, [isPublicView]);
 
   // ---------- Load spots (PRIVATE) ----------
   const loadSpotsPrivate = async () => {
@@ -493,16 +573,219 @@ export default function App() {
     }
   };
 
+  const openSharedPlan = (planId) => {
+    if (!planId) return;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("plan", planId);
+    window.history.pushState({}, "", nextUrl.pathname + nextUrl.search + nextUrl.hash);
+    setSharedPlanId(planId);
+  };
+
+  const closeSharedPlan = () => {
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("plan");
+    window.history.pushState({}, "", nextUrl.pathname + nextUrl.search + nextUrl.hash);
+    setSharedPlanId(null);
+    setSavedPlan(null);
+    setPlanName("");
+    setPlanItems([]);
+    setSelectedSpot(null);
+    setSharedSpotDetailsById({});
+  };
+
+  const toAbsoluteShareUrl = (urlLike, planId) => {
+    if (typeof urlLike === "string" && urlLike.trim()) {
+      const s = urlLike.trim();
+      if (s.startsWith("http://") || s.startsWith("https://")) return s;
+      if (s.startsWith("/")) return window.location.origin + s;
+      return window.location.origin + "/" + s;
+    }
+    if (planId) return window.location.origin + "/?plan=" + encodeURIComponent(planId);
+    return null;
+  };
+
+  const deleteSavedPlan = async (planId) => {
+    if (!planId) return;
+    if (!getIdToken()) {
+      alert("Please sign in first.");
+      return;
+    }
+
+    const ok = window.confirm("Delete this plan?");
+    if (!ok) return;
+
+    setDeletingPlanId(planId);
+    try {
+      const res = await apiFetchAuthed("/plans/" + encodeURIComponent(planId), { method: "DELETE" });
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error("DELETE /plans/{id} is not available on backend yet.");
+        }
+        const errText = await res.text();
+        throw new Error("DELETE /plans failed: " + res.status + " " + errText);
+      }
+
+      setSavedPlans((prev) => {
+        const next = prev.filter((x) => x.planId !== planId);
+        writeSavedPlansCache(next);
+        return next;
+      });
+
+      if (sharedPlanId === planId) closeSharedPlan();
+    } catch (err) {
+      console.error(err);
+      alert(err && err.message ? err.message : "Failed to delete plan. Check console.");
+    } finally {
+      setDeletingPlanId(null);
+    }
+  };
+
+  const loadSavedPlansPrivate = async () => {
+    if (!API_BASE) return;
+
+    setIsLoadingSavedPlans(true);
+    try {
+      const res = await apiFetchAuthed("/plans", { method: "GET" });
+      if (!res.ok) {
+        // Graceful fallback when endpoint is not deployed yet or auth is not ready.
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          setSavedPlans([]);
+          return;
+        }
+        throw new Error("HTTP " + res.status);
+      }
+
+      const data = await res.json();
+      const raw =
+        (Array.isArray(data) && data) ||
+        (Array.isArray(data && data.items) && data.items) ||
+        (Array.isArray(data && data.plans) && data.plans) ||
+        (Array.isArray(data && data.data && data.data.items) && data.data.items) ||
+        (Array.isArray(data && data.data && data.data.plans) && data.data.plans) ||
+        [];
+
+      const parsePlanId = (x) => {
+        if (typeof x.planId === "string" && x.planId) return x.planId;
+        if (typeof x.id === "string" && x.id) return x.id;
+        if (typeof x.sk === "string" && x.sk.startsWith("PLAN#")) return x.sk.slice(5);
+        return null;
+      };
+
+      const plansArray = raw
+        .map((x) => ({
+          planId: parsePlanId(x),
+          name: typeof x.name === "string" && x.name.trim() ? x.name.trim() : "Untitled plan",
+          isPublic: !!x.isPublic,
+          updatedAt: x.updatedAt || x.createdAt || null,
+          shareUrl:
+            toAbsoluteShareUrl(
+              (typeof x.shareUrl === "string" && x.shareUrl) ||
+              (typeof x.publicUrl === "string" && x.publicUrl) ||
+              (typeof x.url === "string" && x.url),
+              parsePlanId(x)
+            ),
+        }))
+        .filter((x) => typeof x.planId === "string" && x.planId.length > 0);
+
+      setSavedPlans(plansArray);
+      writeSavedPlansCache(plansArray);
+    } catch (err) {
+      console.error("Load saved plans failed:", err);
+      // Do not block startup UX with popups when /plans is unavailable or CORS fails.
+      setSavedPlans(readSavedPlansCache());
+      if (err && err.code === "NO_AUTH") return;
+    } finally {
+      setIsLoadingSavedPlans(false);
+    }
+  };
+
+  const loadPlanSpotDetailsFromPrivate = async (spotIds) => {
+    if (!API_BASE || !spotIds.length) return;
+
+    setIsLoadingSpots(true);
+    try {
+      const res = await apiFetchAuthed("/spots", { method: "GET" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+
+      const data = await res.json();
+      const raw = Array.isArray(data) ? data : (data && data.items) || [];
+      const requestedIds = new Set(spotIds);
+
+      const matched = raw
+        .filter((x) => x && typeof x.id === "string" && requestedIds.has(x.id))
+        .map((x) => {
+          const lat = typeof x.lat === "string" ? parseFloat(x.lat) : x.lat;
+          const lng = typeof x.lng === "string" ? parseFloat(x.lng) : x.lng;
+          return { ...x, lat, lng };
+        })
+        .filter(
+          (x) =>
+            x &&
+            typeof x.id === "string" &&
+            typeof x.spotName === "string" &&
+            x.spotName.trim().length > 0 &&
+            typeof x.address === "string" &&
+            x.address.trim().length > 0 &&
+            Number.isFinite(x.lat) &&
+            Number.isFinite(x.lng)
+        );
+
+      if (!matched.length) return;
+
+      setSpots((prev) => {
+        const byId = new Map(prev.map((x) => [x.id, x]));
+        for (const spot of matched) byId.set(spot.id, spot);
+        return Array.from(byId.values());
+      });
+    } catch (err) {
+      console.error("Load private spot details for shared plan failed:", err);
+      if (err && err.code === "NO_AUTH") return;
+      alert("Failed to load spot details for this shared plan. Please sign in and try again.");
+    } finally {
+      setIsLoadingSpots(false);
+    }
+  };
+
   useEffect(() => {
     if (!API_BASE) return;
     if (isPublicView) return;
 
-    // ✅ dùng id_token cho consistency vì apiFetchAuthed dùng id_token
+    // Use id_token consistently because apiFetchAuthed uses id_token.
     if (!getIdToken()) return;
 
     loadSpotsPrivate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [API_BASE, isPublicView, authUser]);
+
+  useEffect(() => {
+    if (!API_BASE) return;
+    if (isPublicView) return;
+    if (!authUser || !getIdToken()) {
+      setSavedPlans([]);
+      return;
+    }
+
+    // Show last-known list instantly while refreshing from backend.
+    const cached = readSavedPlansCache();
+    if (Array.isArray(cached) && cached.length) setSavedPlans(cached);
+    loadSavedPlansPrivate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [API_BASE, isPublicView, authUser]);
+
+  useEffect(() => {
+    if (!API_BASE) return;
+    if (!isPublicView || !sharedPlanId) return;
+    if (!authUser || !getIdToken()) return;
+    if (!planItems.length) return;
+
+    const missingSpotIds = planItems
+      .map((x) => x.spotId)
+      .filter((spotId) => !getSpotById(spotId));
+
+    if (!missingSpotIds.length) return;
+    loadPlanSpotDetailsFromPrivate(missingSpotIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [API_BASE, isPublicView, sharedPlanId, authUser, planItems, spots]);
 
   // ---------- Pan/zoom AFTER selectedSpot updates ----------
   useEffect(() => {
@@ -598,8 +881,8 @@ export default function App() {
     if (isPublicView) return;
     if (isSaving) return;
 
-    if (!getAccessToken()) {
-      alert("Bạn cần Login trước.");
+    if (!getIdToken()) {
+      alert("Please sign in first.");
       return;
     }
 
@@ -684,8 +967,8 @@ export default function App() {
   const removeSpot = async (spot) => {
     if (isPublicView) return;
 
-    if (!getAccessToken()) {
-      alert("Bạn cần Login trước.");
+    if (!getIdToken()) {
+      alert("Please sign in first.");
       return;
     }
 
@@ -718,8 +1001,8 @@ export default function App() {
   const savePlan = async () => {
     if (isPublicView) return;
 
-    if (!getAccessToken()) {
-      alert("Bạn cần Login trước.");
+    if (!getIdToken()) {
+      alert("Please sign in first.");
       return;
     }
 
@@ -736,7 +1019,19 @@ export default function App() {
 
     const payload = {
       name,
-      items: planItems.map((x, idx) => ({ spotId: x.spotId, visited: !!x.visited, order: idx })),
+      items: planItems.map((x, idx) => {
+        const spot = getSpotById(x.spotId) || sharedSpotDetailsById[x.spotId] || {};
+        return {
+          spotId: x.spotId,
+          visited: !!x.visited,
+          order: idx,
+          spotName: spot.spotName || "",
+          address: spot.address || "",
+          videoUrl: spot.videoUrl || "",
+          lat: Number.isFinite(spot.lat) ? spot.lat : null,
+          lng: Number.isFinite(spot.lng) ? spot.lng : null,
+        };
+      }),
       isPublic: true,
     };
 
@@ -755,12 +1050,25 @@ export default function App() {
 
       const data = await res.json();
       const planId = data && data.planId;
-      const shareUrl =
-        (data && data.shareUrl) ||
-        (planId ? window.location.origin + "/?plan=" + encodeURIComponent(planId) : null);
+      const shareUrl = toAbsoluteShareUrl(data && data.shareUrl, planId);
 
       const saved = { ...data, planId, shareUrl };
       setSavedPlan(saved);
+      setSavedPlans((prev) => {
+        const next = [
+          {
+            planId: saved.planId,
+            name,
+            isPublic: true,
+            updatedAt: new Date().toISOString(),
+            shareUrl: saved.shareUrl,
+          },
+          ...prev.filter((x) => x.planId !== saved.planId),
+        ];
+        writeSavedPlansCache(next);
+        return next;
+      });
+      loadSavedPlansPrivate();
 
       if (saved && saved.shareUrl && navigator.clipboard && navigator.clipboard.writeText) {
         try {
@@ -855,15 +1163,6 @@ export default function App() {
                 )}
               </div>
 
-              {isPublicView && (
-                <div className="text-xs text-gray-500 text-right">
-                  {isLoadingSharedPlan
-                    ? "Loading plan…"
-                    : sharedPlanId
-                      ? `Plan: ${sharedPlanId}`
-                      : ""}
-                </div>
-              )}
             </div>
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-3">
@@ -934,18 +1233,13 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-md overflow-hidden">
             <div className="px-5 pt-5 pb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">Map</h2>
-              {followMode && (
-                <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full">
-                  Follow mode
-                </span>
-              )}
             </div>
 
             {isLoaded ? (
               <div className="px-5 pb-5">
                 <div className="rounded-2xl overflow-hidden shadow-sm border">
                   <GoogleMap
-                    mapContainerStyle={{ width: "100%", height: "320px" }}
+                    mapContainerStyle={{ width: "100%", height: "680px" }}
                     center={defaultCenter}
                     zoom={12}
                     onLoad={(map) => {
@@ -999,6 +1293,76 @@ export default function App() {
           </div>
         </div>
 
+        {/* SAVED PLANS */}
+        {!isPublicView && (
+          <div className="bg-white rounded-2xl shadow-md p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Saved plans</h2>
+              {isLoadingSavedPlans && <span className="text-sm text-gray-500">Loading…</span>}
+            </div>
+
+            {!authUser ? (
+              <div className="text-sm text-gray-500">Sign in to see your saved plans.</div>
+            ) : savedPlans.length === 0 ? (
+              <div className="text-sm text-gray-500">No saved plans yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {savedPlans.map((p) => (
+                  <div
+                    key={p.planId}
+                    className="border rounded-xl p-3 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{p.name}</p>
+                      {p.shareUrl && (
+                        <a
+                          className="text-xs text-red-500 underline break-all"
+                          href={p.shareUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {p.shareUrl}
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {p.shareUrl && (
+                        <button
+                          className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(p.shareUrl);
+                              alert("Copied!");
+                            } catch {
+                              alert("Copy failed. You can copy the link manually.");
+                            }
+                          }}
+                        >
+                          Copy link
+                        </button>
+                      )}
+                      <button
+                        className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                        onClick={() => openSharedPlan(p.planId)}
+                      >
+                        Open
+                      </button>
+                      <button
+                        className="text-xs px-3 py-2 rounded-xl border bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-60"
+                        onClick={() => deleteSavedPlan(p.planId)}
+                        disabled={deletingPlanId === p.planId}
+                      >
+                        {deletingPlanId === p.planId ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TODAY PLAN */}
         <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -1009,6 +1373,18 @@ export default function App() {
                   ? "Public viewers can optimize, follow, mark done, and remove locally (changes are not saved)."
                   : "Add spots, optimize, then tick them off as you go."}
               </p>
+              {sharedPlanId && (
+                <div className="mt-2 flex items-center gap-3">
+                  <a
+                    href={window.location.origin + "/?plan=" + encodeURIComponent(sharedPlanId)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-red-500 underline"
+                  >
+                    Share link
+                  </a>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-2 items-end">
@@ -1022,12 +1398,12 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setFollowMode((v) => !v)}
-                title={isPublicView ? "Public view: changes are local only" : ""}
-                className={`text-xs px-3 py-2 rounded-xl transition ${followMode ? "bg-red-500 text-white" : "border bg-gray-50 hover:bg-gray-100"
+                onClick={closeSharedPlan}
+                disabled={!isPublicView}
+                className={`text-xs px-3 py-2 rounded-xl border ${isPublicView ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-gray-200 text-gray-500 cursor-not-allowed"
                   }`}
               >
-                {followMode ? "Following" : "Follow"}
+                Close plan
               </button>
             </div>
           </div>
@@ -1043,9 +1419,9 @@ export default function App() {
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+              <div className="space-y-3">
               {planItems.map((item, index) => {
-                const spot = getSpotById(item.spotId);
+                const spot = getSpotById(item.spotId) || sharedSpotDetailsById[item.spotId];
 
                 if (!spot) {
                   return (
@@ -1203,10 +1579,11 @@ export default function App() {
                   return;
                 }
                 setPlanItems([]);
-                setFollowMode(false);
+                setFollowMode(true);
                 setSelectedSpot(null);
                 setSavedPlan(null);
                 setPlanName("");
+                setSharedSpotDetailsById({});
               }}
               disabled={!isPublicView && planItems.length === 0}
               title={isPublicView ? "Reset back to the shared plan" : ""}
@@ -1234,7 +1611,7 @@ export default function App() {
 
           {!authUser && !isPublicView && (
             <div className="bg-white rounded-2xl shadow-md p-4 text-sm text-gray-600">
-              Đây là protected view. Hãy bấm <b>Login</b> để load spots.
+              This is a protected view. Click <b>Login</b> to load spots.
             </div>
           )}
 
