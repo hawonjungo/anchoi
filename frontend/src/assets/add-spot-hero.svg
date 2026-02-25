@@ -1,0 +1,51 @@
+<svg width="1800" height="600" viewBox="0 0 1800 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1800" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF2E8"/>
+      <stop offset="0.48" stop-color="#FFE1CC"/>
+      <stop offset="1" stop-color="#FFD0A8"/>
+    </linearGradient>
+    <linearGradient id="route" x1="230" y1="390" x2="1370" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EF4444"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#F87171"/>
+      <stop offset="1" stop-color="#DC2626"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1800" height="600" fill="url(#bg)"/>
+
+  <circle cx="1580" cy="120" r="110" fill="#FFF8F1" opacity="0.75"/>
+  <circle cx="1260" cy="520" r="150" fill="#FFEAD5" opacity="0.7"/>
+  <circle cx="230" cy="100" r="90" fill="#FFE7D2" opacity="0.8"/>
+
+  <path d="M230 390C400 290 500 440 660 330C790 242 980 320 1110 260C1230 204 1320 260 1370 220" stroke="url(#route)" stroke-width="14" stroke-linecap="round" stroke-dasharray="1 24"/>
+
+  <g filter="url(#shadow)">
+    <rect x="1040" y="140" width="470" height="260" rx="36" fill="#FFFDFB"/>
+    <circle cx="1130" cy="272" r="74" fill="#FFE5CC"/>
+    <rect x="1215" y="214" width="230" height="24" rx="12" fill="#FFD6B3"/>
+    <rect x="1215" y="252" width="180" height="20" rx="10" fill="#FFE2C7"/>
+    <rect x="1215" y="286" width="210" height="20" rx="10" fill="#FFE2C7"/>
+  </g>
+
+  <g transform="translate(710,145)" filter="url(#shadow)">
+    <path d="M90 0C40.294 0 0 40.294 0 90C0 155 90 260 90 260C90 260 180 155 180 90C180 40.294 139.706 0 90 0Z" fill="url(#pin)"/>
+    <circle cx="90" cy="88" r="36" fill="#FFF5F5"/>
+  </g>
+
+  <g transform="translate(300,180)">
+    <rect x="0" y="0" width="280" height="170" rx="32" fill="#FFFFFF" opacity="0.92"/>
+    <circle cx="70" cy="82" r="38" fill="#F97316" opacity="0.14"/>
+    <circle cx="112" cy="82" r="38" fill="#EF4444" opacity="0.16"/>
+    <circle cx="154" cy="82" r="38" fill="#FB923C" opacity="0.14"/>
+    <rect x="44" y="128" width="192" height="12" rx="6" fill="#FED7AA"/>
+  </g>
+
+  <rect x="0" y="540" width="1800" height="60" fill="#FFFFFF" opacity="0.22"/>
+</svg>

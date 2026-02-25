@@ -2,6 +2,7 @@ import "./App.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-maps/api";
 import { apiFetch } from "./lib/apiClient";
+import addSpotHero from "./assets/banner.png";
 
 export default function App() {
   const env = import.meta.env;
@@ -1152,10 +1153,13 @@ export default function App() {
         {/* Top: Form + Map */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* FORM */}
-          <div className="bg-white rounded-2xl shadow-md p-5 relative">
+          <div className="bg-white rounded-2xl shadow-md p-6 relative">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Add new spot</h2>
+                <h2 className="text-2xl font-semibold tracking-tight text-gray-900">Add new spot</h2>
+                <p className="text-sm leading-6 text-gray-500 mt-1">
+                  Save standout food and hangout places with complete details for planning and sharing.
+                </p>
                 {isPublicView && (
                   <p className="text-sm text-gray-500 mt-1">
                     You’re viewing a shared plan. Editing is disabled.
@@ -1165,9 +1169,17 @@ export default function App() {
 
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+            <div className="mt-5 mb-5">
+              <img
+                src={addSpotHero}
+                alt="Urban food discovery banner"
+                className="w-full h-40 rounded-xl border border-orange-100 object-cover"
+              />
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
               <div>
-                <label className="text-xs font-medium text-gray-600">Video URL</label>
+                <label className="text-xs font-medium uppercase tracking-wide text-gray-600">Video URL</label>
                 <input
                   type="text"
                   placeholder="https://…"
@@ -1182,7 +1194,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-600">Spot name</label>
+                <label className="text-xs font-medium uppercase tracking-wide text-gray-600">Spot name</label>
                 <input
                   type="text"
                   value={spotName}
@@ -1196,7 +1208,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-600">Address</label>
+                <label className="text-xs font-medium uppercase tracking-wide text-gray-600">Address</label>
                 <input
                   type="text"
                   value={address}
