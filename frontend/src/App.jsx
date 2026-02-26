@@ -1093,25 +1093,25 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* HEADER */}
-      <header className="bg-white border-b sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="bg-white border-b z-20 sm:sticky sm:top-0">
+        <div className="max-w-6xl mx-auto px-4 py-2 sm:py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900">AnChoi</h1>
-            <p className="text-xs text-gray-500">Eat • Explore • Plan</p>
+            <p className="text-xs text-gray-500">Eat | Explore | Plan</p>
           </div>
 
-          <div className="text-xs text-gray-500 flex items-center gap-2">
+          <div className="text-xs text-gray-500 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             {sharedPlanId && (
               <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-full">
                 Public view
               </span>
             )}
 
-            <span>{isLoadingSpots ? "Loading…" : `${spots.length} spots`}</span>
+            <span>{isLoadingSpots ? "Loading..." : `${spots.length} spots`}</span>
 
             {/* AUTH UI */}
             {authUser ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 {authUser.picture ? (
                   <img
                     src={authUser.picture}
@@ -1123,7 +1123,7 @@ export default function App() {
                   <div className="w-8 h-8 rounded-full border bg-gray-100" />
                 )}
 
-                <span className="text-xs text-gray-700 max-w-[180px] truncate">
+                <span className="text-xs text-gray-700 max-w-[120px] sm:max-w-[180px] truncate">
                   {authUser.name}
                 </span>
 
@@ -1142,7 +1142,7 @@ export default function App() {
                 className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100 disabled:opacity-60"
                 title="Login"
               >
-                {isAuthLoading ? "Logging in…" : "Login"}
+                {isAuthLoading ? "Logging in..." : "Login"}
               </button>
             )}
           </div>
@@ -1153,7 +1153,7 @@ export default function App() {
         {/* Top: Form + Map */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* FORM */}
-          <div className="bg-white rounded-2xl shadow-md p-6 relative">
+          <div className="bg-white rounded-2xl shadow-md p-4 sm:p-6 relative">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight text-gray-900">Add new spot</h2>
@@ -1162,7 +1162,7 @@ export default function App() {
                 </p>
                 {isPublicView && (
                   <p className="text-sm text-gray-500 mt-1">
-                    You’re viewing a shared plan. Editing is disabled.
+                    You're viewing a shared plan. Editing is disabled.
                   </p>
                 )}
               </div>
@@ -1173,7 +1173,7 @@ export default function App() {
               <img
                 src={addSpotHero}
                 alt="Urban food discovery banner"
-                className="w-full h-40 rounded-xl border border-orange-100 object-cover"
+                className="w-full h-28 sm:h-40 rounded-xl border border-orange-100 object-cover"
               />
             </div>
 
@@ -1182,7 +1182,7 @@ export default function App() {
                 <label className="text-xs font-medium uppercase tracking-wide text-gray-600">Video URL</label>
                 <input
                   type="text"
-                  placeholder="https://…"
+                  placeholder="https://..."
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                   disabled={isPublicView}
@@ -1223,14 +1223,14 @@ export default function App() {
 
               <button
                 type="submit"
-                disabled={isPublicView || isSaving}
-                title={isPublicView ? "Login required" : ""}
-                className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || isSaving
+                disabled={isPublicView || isSaving || !authUser}
+                title={isPublicView || !authUser ? "Login required" : ""}
+                className={`w-full py-3 rounded-xl font-semibold transition ${isPublicView || isSaving || !authUser
                     ? "bg-gray-300 text-gray-700 cursor-not-allowed"
                     : "bg-red-500 text-white hover:bg-red-600"
                   }`}
               >
-                {isPublicView ? "Login to add spots" : isSaving ? "Saving…" : "Save spot"}
+                {isPublicView || !authUser ? "Login to add spots" : isSaving ? "Saving..." : "Save spot"}
               </button>
 
               {!API_BASE && (
@@ -1251,7 +1251,7 @@ export default function App() {
               <div className="px-5 pb-5">
                 <div className="rounded-2xl overflow-hidden shadow-sm border">
                   <GoogleMap
-                    mapContainerStyle={{ width: "100%", height: "680px" }}
+                    mapContainerStyle={{ width: "100%", height: "clamp(340px, 58vh, 680px)" }}
                     center={defaultCenter}
                     zoom={12}
                     onLoad={(map) => {
@@ -1280,7 +1280,7 @@ export default function App() {
                               <h3 className="font-bold">{selectedSpot.spotName}</h3>
                               {selectedSpot._optimistic && (
                                 <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
-                                  Saving…
+                                  Saving...
                                 </span>
                               )}
                             </div>
@@ -1300,7 +1300,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="p-6">Loading map…</div>
+              <div className="p-6">Loading map...</div>
             )}
           </div>
         </div>
@@ -1310,7 +1310,7 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-md p-5 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">Saved plans</h2>
-              {isLoadingSavedPlans && <span className="text-sm text-gray-500">Loading…</span>}
+              {isLoadingSavedPlans && <span className="text-sm text-gray-500">Loading...</span>}
             </div>
 
             {!authUser ? (
@@ -1322,9 +1322,9 @@ export default function App() {
                 {savedPlans.map((p) => (
                   <div
                     key={p.planId}
-                    className="border rounded-xl p-3 flex items-center justify-between gap-3"
+                    className="border rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 w-full">
                       <p className="text-sm font-semibold text-gray-900 truncate">{p.name}</p>
                       {p.shareUrl && (
                         <a
@@ -1338,10 +1338,10 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 w-full sm:w-auto">
                       {p.shareUrl && (
                         <button
-                          className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                          className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100 w-full sm:w-auto"
                           onClick={async () => {
                             try {
                               await navigator.clipboard.writeText(p.shareUrl);
@@ -1355,13 +1355,13 @@ export default function App() {
                         </button>
                       )}
                       <button
-                        className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                        className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100 w-full sm:w-auto"
                         onClick={() => openSharedPlan(p.planId)}
                       >
                         Open
                       </button>
                       <button
-                        className="text-xs px-3 py-2 rounded-xl border bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-60"
+                        className="text-xs px-3 py-2 rounded-xl border bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-60 w-full sm:w-auto"
                         onClick={() => deleteSavedPlan(p.planId)}
                         disabled={deletingPlanId === p.planId}
                       >
@@ -1379,7 +1379,7 @@ export default function App() {
         <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Today’s plan</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Today's plan</h2>
               <p className="text-sm text-gray-500 mt-1">
                 {isPublicView
                   ? "Public viewers can optimize, follow, mark done, and remove locally (changes are not saved)."
@@ -1399,10 +1399,10 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex flex-col gap-2 items-end">
+            <div className="flex flex-col gap-2 items-stretch sm:items-end w-full sm:w-auto">
               <button
                 onClick={autoOrderPlan}
-                className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100"
+                className="text-xs px-3 py-2 rounded-xl border bg-gray-50 hover:bg-gray-100 w-full sm:w-auto"
                 disabled={planItems.length < 2}
                 title={planItems.length < 2 ? "Add at least 2 spots" : "Optimize by distance"}
               >
@@ -1412,7 +1412,7 @@ export default function App() {
               <button
                 onClick={closeSharedPlan}
                 disabled={!isPublicView}
-                className={`text-xs px-3 py-2 rounded-xl border ${isPublicView ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                className={`text-xs px-3 py-2 rounded-xl border w-full sm:w-auto ${isPublicView ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-gray-200 text-gray-500 cursor-not-allowed"
                   }`}
               >
                 Close plan
@@ -1462,7 +1462,7 @@ export default function App() {
                         : "bg-gray-50 border-gray-200 hover:bg-gray-100"
                       }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-gray-900 truncate">
                           {index + 1}. {spot.spotName}
@@ -1488,17 +1488,17 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end gap-2 shrink-0">
+                      <div className="flex flex-row sm:flex-col items-stretch sm:items-end gap-2 shrink-0 w-full sm:w-auto">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleVisited(item.spotId);
                           }}
                           title={isPublicView ? "Public view: changes are local only" : ""}
-                          className={`text-xs px-3 py-2 rounded-xl ${item.visited ? "bg-green-600 text-white" : "bg-white border hover:bg-gray-50"
+                          className={`text-xs px-3 py-2 rounded-xl flex-1 sm:flex-none ${item.visited ? "bg-green-600 text-white" : "bg-white border hover:bg-gray-50"
                             }`}
                         >
-                          {item.visited ? "✓" : "Done"}
+                          {item.visited ? "Visited" : "Done"}
                         </button>
 
                         <button
@@ -1507,7 +1507,7 @@ export default function App() {
                             removeFromPlan(item.spotId);
                           }}
                           title={isPublicView ? "Public view: changes are local only" : ""}
-                          className="text-xs text-red-500 hover:text-red-600"
+                          className="text-xs text-red-500 hover:text-red-600 text-left sm:text-right flex-1 sm:flex-none"
                         >
                           Remove
                         </button>
@@ -1564,13 +1564,13 @@ export default function App() {
             <button
               onClick={savePlan}
               disabled={isPublicView || isSavingPlan || planItems.length === 0}
-              title={isPublicView ? "Login required" : ""}
+              title={isPublicView || !authUser ? "Login required" : ""}
               className={`w-full lg:w-auto py-3 px-6 rounded-xl font-semibold transition ${isPublicView || isSavingPlan || planItems.length === 0
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-red-500 text-white hover:bg-red-600"
                 }`}
             >
-              {isPublicView ? "Login to save" : isSavingPlan ? "Saving plan…" : "Save plan"}
+              {isPublicView ? "Login to save" : isSavingPlan ? "Saving plan..." : "Save plan"}
             </button>
           </div>
 
@@ -1611,14 +1611,14 @@ export default function App() {
 
         {/* SPOTS */}
         <div className="space-y-3">
-          <div className="flex items-end justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Your spots</h2>
               <p className="text-sm text-gray-500">
-                Tap a card to focus the map. {isPublicView ? "Public viewers can only view." : "Add it to today’s plan."}
+                Tap a card to focus the map. {isPublicView ? "Public viewers can only view." : "Add it to Today's plan."}
               </p>
             </div>
-            {isLoadingSpots && <span className="text-sm text-gray-500">Loading…</span>}
+            {isLoadingSpots && <span className="text-sm text-gray-500">Loading...</span>}
           </div>
 
           {!authUser && !isPublicView && (
@@ -1655,7 +1655,7 @@ export default function App() {
                           addToPlan(spot);
                         }}
                         disabled={isPublicView || inPlan}
-                        title={isPublicView ? "Login required" : ""}
+                        title={isPublicView || !authUser ? "Login required" : ""}
                         className={`text-xs px-3 py-2 rounded-full font-medium transition ${isPublicView
                             ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                             : inPlan
@@ -1684,7 +1684,7 @@ export default function App() {
                           removeSpot(spot);
                         }}
                         disabled={isPublicView}
-                        title={isPublicView ? "Login required" : ""}
+                        title={isPublicView || !authUser ? "Login required" : ""}
                         className={`text-sm ${isPublicView ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"
                           }`}
                       >
@@ -1694,7 +1694,7 @@ export default function App() {
 
                     {spot._optimistic && (
                       <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2">
-                        Saving…
+                        Saving...
                       </div>
                     )}
                   </div>
@@ -1705,10 +1705,16 @@ export default function App() {
         </div>
 
         <footer className="text-center text-xs text-gray-400 py-6">
-          © {new Date().getFullYear()} AnChoi • AWS (Lambda + API Gateway + DynamoDB)
+          (c) {new Date().getFullYear()} AnChoi | AWS (Lambda + API Gateway + DynamoDB)
         </footer>
       </div>
     </div>
   );
 }
+
+
+
+
+
+
 
