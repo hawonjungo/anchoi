@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, Marker, InfoWindow, useJsApiLoader } from "@react-google-maps/api";
 import { apiFetch } from "./lib/apiClient";
 import addSpotHero from "./assets/banner.png";
+import anchoiLogo from "./assets/AnChoiLogo.png";
 
 export default function App() {
   const env = import.meta.env;
@@ -292,6 +293,7 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState("");
   const [spotName, setSpotName] = useState("");
   const [address, setAddress] = useState("");
+  const [activeTab, setActiveTab] = useState("eat");
 
   // -------- Data state --------
   const [spots, setSpots] = useState([]);
@@ -317,6 +319,8 @@ export default function App() {
   // -------- Refs --------
   const mapRef = useRef(null);
   const geoCacheRef = useRef(new Map());
+  const planSectionRef = useRef(null);
+  const spotsSectionRef = useRef(null);
 
   const defaultCenter = useMemo(() => ({ lat: 10.819655, lng: 106.63331 }), []); // HCM
 
@@ -326,6 +330,14 @@ export default function App() {
 
   // ---------- Helpers ----------
   const getSpotById = (id) => spots.find((s) => s.id === id);
+  const normalizedActiveCategory = activeTab === "explore" ? "explore" : "eat";
+  const visibleSpots = useMemo(() => {
+    if (isPublicView) return spots;
+    return spots.filter((s) => {
+      const category = typeof s.category === "string" ? s.category.toLowerCase() : "eat";
+      return category === normalizedActiveCategory;
+    });
+  }, [spots, isPublicView, normalizedActiveCategory]);
 
   const haversineKm = (a, b) => {
     const R = 6371;
@@ -550,7 +562,15 @@ export default function App() {
         .map((x) => {
           const lat = typeof x.lat === "string" ? parseFloat(x.lat) : x.lat;
           const lng = typeof x.lng === "string" ? parseFloat(x.lng) : x.lng;
-          return { ...x, lat, lng };
+          return {
+            ...x,
+            lat,
+            lng,
+            category:
+              typeof x?.category === "string" && x.category.trim()
+                ? x.category.toLowerCase()
+                : "eat",
+          };
         })
         .filter(
           (x) =>
@@ -906,6 +926,7 @@ export default function App() {
       address: addr,
       lat: defaultCenter.lat,
       lng: defaultCenter.lng,
+      category: normalizedActiveCategory,
       _optimistic: true,
     };
 
@@ -934,6 +955,7 @@ export default function App() {
         address: addr,
         lat: location.lat,
         lng: location.lng,
+        category: normalizedActiveCategory,
       };
 
       const res = await apiFetchAuthed("/spots", {
@@ -947,7 +969,14 @@ export default function App() {
         throw new Error("POST /spots failed: " + res.status + " " + errText);
       }
 
-      const created = await res.json();
+      const createdRaw = await res.json();
+      const created = {
+        ...createdRaw,
+        category:
+          typeof createdRaw?.category === "string" && createdRaw.category.trim()
+            ? createdRaw.category.toLowerCase()
+            : normalizedActiveCategory,
+      };
 
       setSpots((prev) => prev.map((s) => (s.id === optimisticId ? created : s)));
       setSelectedSpot((prev) => (prev && prev.id === optimisticId ? created : prev));
@@ -1094,13 +1123,16 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* HEADER */}
       <header className="bg-white border-b z-20 sm:sticky sm:top-0">
-        <div className="max-w-6xl mx-auto px-4 py-2 sm:py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">AnChoi</h1>
-            <p className="text-xs text-gray-500">Eat | Explore | Plan</p>
+        <div className="max-w-6xl mx-auto px-4 py-2 sm:py-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="my-1 h-16 sm:h-16 md:h-20 lg:h-20 w-[195px] sm:w-[240px] md:w-[240px] overflow-hidden">
+            <img
+              src={anchoiLogo}
+              alt="AnChoi logo"
+              className="h-full w-full object-cover object-left origin-left scale-125"
+            />
           </div>
 
-          <div className="text-xs text-gray-500 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+          <div className="text-xs text-gray-500 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto self-end">
             {sharedPlanId && (
               <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-full">
                 Public view
@@ -1156,10 +1188,42 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-md p-4 sm:p-6 relative">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight text-gray-900">Add new spot</h2>
-                <p className="text-sm leading-6 text-gray-500 mt-1">
-                  Save standout food and hangout places with complete details for planning and sharing.
-                </p>
+                <div className="mt-3 inline-flex w-full sm:w-auto rounded-xl border border-gray-200 bg-gray-50 p-1 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("eat");
+                    }}
+                    className={`px-3 py-2 text-xs sm:text-sm rounded-lg transition ${activeTab === "eat" ? "bg-white text-red-600 shadow-sm border border-red-100" : "text-gray-600 hover:text-gray-900"
+                      }`}
+                  >
+                    Eat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("explore");
+                    }}
+                    className={`px-3 py-2 text-xs sm:text-sm rounded-lg transition ${activeTab === "explore"
+                        ? "bg-white text-red-600 shadow-sm border border-red-100"
+                        : "text-gray-600 hover:text-gray-900"
+                      }`}
+                  >
+                    Play
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("plan");
+                      planSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    className={`px-3 py-2 text-xs sm:text-sm rounded-lg transition ${activeTab === "plan" ? "bg-white text-red-600 shadow-sm border border-red-100" : "text-gray-600 hover:text-gray-900"
+                      }`}
+                  >
+                    Plan
+                  </button>
+                </div>
+
                 {isPublicView && (
                   <p className="text-sm text-gray-500 mt-1">
                     You're viewing a shared plan. Editing is disabled.
@@ -1376,7 +1440,7 @@ export default function App() {
         )}
 
         {/* TODAY PLAN */}
-        <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
+        <div ref={planSectionRef} className="bg-white rounded-2xl shadow-md p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Today's plan</h2>
@@ -1409,14 +1473,14 @@ export default function App() {
                 Optimize
               </button>
 
-              <button
-                onClick={closeSharedPlan}
-                disabled={!isPublicView}
-                className={`text-xs px-3 py-2 rounded-xl border w-full sm:w-auto ${isPublicView ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  }`}
-              >
-                Close plan
-              </button>
+              {isPublicView && (
+                <button
+                  onClick={closeSharedPlan}
+                  className="text-xs px-3 py-2 rounded-xl border w-full sm:w-auto bg-red-100 text-red-600 hover:bg-red-200"
+                >
+                  Close plan
+                </button>
+              )}
             </div>
           </div>
 
@@ -1610,10 +1674,18 @@ export default function App() {
         </div>
 
         {/* SPOTS */}
-        <div className="space-y-3">
+        <div ref={spotsSectionRef} className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Your spots</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {isPublicView
+                  ? "Your spots"
+                  : activeTab === "explore"
+                    ? "Play spots"
+                    : activeTab === "plan"
+                      ? "Your spots"
+                      : "Eat spots"}
+              </h2>
               <p className="text-sm text-gray-500">
                 Tap a card to focus the map. {isPublicView ? "Public viewers can only view." : "Add it to Today's plan."}
               </p>
@@ -1627,13 +1699,13 @@ export default function App() {
             </div>
           )}
 
-          {spots.length === 0 ? (
+          {visibleSpots.length === 0 ? (
             <div className="text-gray-500 text-center py-10 bg-white rounded-2xl shadow-md">
-              No spots yet.
+              {isPublicView ? "No spots yet." : `No ${normalizedActiveCategory} spots yet.`}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {spots.map((spot) => {
+              {visibleSpots.map((spot) => {
                 const inPlan = planItems.some((x) => x.spotId === spot.id);
 
                 return (
