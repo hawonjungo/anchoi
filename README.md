@@ -63,6 +63,7 @@ src/
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
+<img width="576" height="459" alt="image" src="https://github.com/user-attachments/assets/97c13d51-cfd9-48b3-a1a0-96677f65bcfd" />
 
 ### Authentication Flow
 
