@@ -1686,18 +1686,9 @@ export default function App() {
                       ? "Your spots"
                       : "Eat spots"}
               </h2>
-              <p className="text-sm text-gray-500">
-                Tap a card to focus the map. {isPublicView ? "Public viewers can only view." : "Add it to Today's plan."}
-              </p>
             </div>
             {isLoadingSpots && <span className="text-sm text-gray-500">Loading...</span>}
           </div>
-
-          {!authUser && !isPublicView && (
-            <div className="bg-white rounded-2xl shadow-md p-4 text-sm text-gray-600">
-              This is a protected view. Click <b>Login</b> to load spots.
-            </div>
-          )}
 
           {visibleSpots.length === 0 ? (
             <div className="text-gray-500 text-center py-10 bg-white rounded-2xl shadow-md">
