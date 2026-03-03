@@ -1,4 +1,5 @@
-# AnChoi Frontend
+# AnChoi 
+https://anchoi.relifes.net/
 
 A modern React application for collaborative spot planning and discovery with real-time geospatial visualization. The project also served as a hands-on exploration of AWS services, leveraging AI-assisted learning to deepen my understanding of cloud architecture and deployment workflows.
 
